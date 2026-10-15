@@ -157,6 +157,10 @@ local function runMatch(match, view, sink, opts, step, onEnd)
 		onDevice = function(d)
 			device = d
 		end,
+		onZoom = function(delta)
+			world:zoom(delta)
+		end,
+		mouseAim = opts.mouseAim ~= false,
 	})
 	device = input.device
 	hud.gui.Enabled = true
@@ -165,6 +169,7 @@ local function runMatch(match, view, sink, opts, step, onEnd)
 		input:update(dt)
 		step(dt)
 		view.aim = input:currentAim()
+		view.point = input:currentPoint()
 		view.device = device
 		world:step(dt, view)
 		world:updateCamera(dt)

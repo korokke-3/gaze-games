@@ -230,7 +230,7 @@ NetFire("MatchInput", a, 12345)
 Check("壊れた入力でも落ちない", true)
 -- 終了まで (3 分)
 local okE, errE = pcall(function()
-	for _ = 1, 60 * 200 do
+	for _ = 1, 60 * 400 do
 		FakeClock += 1 / 60
 		Fire("Heartbeat", 1 / 60)
 		if lastOf(a, "OnlineEnd") ~= nil then

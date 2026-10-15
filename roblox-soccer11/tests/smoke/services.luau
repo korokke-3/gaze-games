@@ -106,6 +106,10 @@ rs.Name = "ReplicatedStorage"
 local camera = Instance.new("Camera")
 camera.ViewportSize = Vector2.new(1280, 720)
 camera.FieldOfView = 70
+camera.ViewportPointToRay = function(_, x, y)
+	-- 真上から少し手前に傾けたカメラ (おおよそ)
+	return { Origin = Vector3.new(0, 120, 70), Direction = Vector3.new((x - 640) / 640, -1, (y - 360) / 360 - 0.6).Unit }
+end
 local workspace_ = Instance.new("Folder")
 workspace_.Name = "Workspace"
 workspace_.CurrentCamera = camera

@@ -819,6 +819,101 @@ do
 	check("サーバーで適用した入力でパスが出る", mm.ball.owner == nil and mm.ball.kind == "pass")
 end
 
+print("== マウスで地点を指す ==")
+do
+	-- 横 (100°) にいる味方を指すと、その味方へ (スティックの補助の角度外でも)
+	local m = Match.new({ random = lcg(301), assist = 1 })
+	clearOpponents(m)
+	local s = m:seat(1)
+	local p = giveBall(m, s, { x = 0, y = 0 })
+	for _, q in m:active(0) do
+		if q ~= p and not q.gk then
+			q.p = { x = 100, y = 100 }
+		end
+	end
+	local mate = m.teams[0][7]
+	mate.p = { x = -3, y = 15 }
+	m:setMove(1, 1, 0)
+	m:setAimPoint(1, -3, 15)
+	m:press(1, "pass")
+	step(m, 6)
+	check("指した味方がプレビューに出る", m:previewReceiver(s) == mate)
+	m:release(1, "pass")
+	check("指した味方へパス (走る向きと関係ない)", m.ball.target == mate)
+	check("ボールが指した方向へ", m.ball.v.y > 0 and math.abs(m.ball.v.x) < m.ball.v.y)
+
+	-- 空いたスペースを指してスルー: そこへ出し、一番近い味方が走り込む
+	local m2 = Match.new({ random = lcg(302), assist = 1 })
+	clearOpponents(m2)
+	local s2 = m2:seat(1)
+	giveBall(m2, s2, { x = 0, y = 0 })
+	local runner = m2.teams[0][9] -- LW
+	runner.p = { x = 10, y = -15 }
+	m2:setAimPoint(1, 25, -18)
+	hold(m2, 1, "through", 0.4)
+	local dir = math.deg(math.atan2(m2.ball.v.y, m2.ball.v.x))
+	local want = math.deg(math.atan2(-18, 25))
+	check("スペースへのスルーは指した地点の方向へ", angDiff(dir, want) < 8, dir .. " vs " .. want)
+	check("近い味方が受け手 (走り込む)", m2.ball.target == runner)
+	local reached = false
+	for _ = 1, 30 * 4 do
+		m2:update(1 / 30)
+		if m2.ball.owner == runner then
+			reached = true
+			break
+		end
+	end
+	check("走り込んだ味方が受ける", reached)
+
+	-- 何もない所へのパスは、指した距離の近くまで転がる
+	local m3 = Match.new({ random = lcg(303), assist = 1 })
+	clearOpponents(m3)
+	local s3 = m3:seat(1)
+	for _, q in m3:active(0) do
+		if q ~= s3.ctrl then
+			q.p = { x = -40, y = q.p.y }
+		end
+	end
+	giveBall(m3, s3, { x = 0, y = 0 })
+	m3:setAimPoint(1, 0, 20)
+	hold(m3, 1, "pass", 0.45)
+	local v = math.sqrt(m3.ball.v.x ^ 2 + m3.ball.v.y ^ 2)
+	local rollDist = v * v / (2 * Config.Physics.Friction)
+	check("指した距離 (20m) の近くまで転がる", rollDist > 13 and rollDist < 32, rollDist)
+
+	-- シュートはゴールの指した位置へ
+	local function shotY(py)
+		local mm = Match.new({ random = lcg(304) })
+		clearOpponents(mm)
+		local ss = mm:seat(1)
+		giveBall(mm, ss, { x = 35, y = 0 })
+		mm:setAimPoint(1, 52.5, py)
+		hold(mm, 1, "shoot", 0.3)
+		return mm.ball.v.y / mm.ball.v.x * 17.5
+	end
+	local up, down = 0, 0
+	for _ = 1, 5 do
+		up += shotY(3)
+		down += shotY(-3)
+	end
+	check("指した側の隅にシュート", up / 5 > 1.5 and down / 5 < -1.5, up / 5 .. " / " .. down / 5)
+
+	-- 守備の Q: マウスに一番近い味方へ切り替え
+	local m4 = Match.new({ random = lcg(305) })
+	local s4 = m4:seat(1)
+	m4:gainBall(m4.teams[1][8])
+	local far = m4.teams[0][5] -- RB
+	far.p = { x = -30, y = 25 }
+	m4:setAimPoint(1, -30, 24)
+	m4:press(1, "l1")
+	check("Q でマウスに近い味方へ切替", s4.ctrl == far, s4.ctrl and s4.ctrl.role)
+
+	-- 同期: 地点も送れる
+	local packed = Snapshot.packInput({ move = { x = 0, y = 0 }, point = { x = -31.4, y = 12.6 }, buttons = { through = true } })
+	local inp = Snapshot.unpackInput(packed)
+	check("地点の往復 (10cm 単位)", inp and inp.point and math.abs(inp.point.x + 31.4) < 0.06 and math.abs(inp.point.y - 12.6) < 0.06 and inp.buttons.through)
+end
+
 print(("%d checks, %d failures"):format(checks, failures))
 if failures > 0 then
 	error("spec failed")

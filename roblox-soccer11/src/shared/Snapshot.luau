@@ -208,7 +208,9 @@ end
 
 -- ================================================================ 入力
 --[[
-	input: { move = {x,y}, aim = {x,y} | nil, buttons = { pass = true, ... }, flick = {x,y} | nil, cmd = string | nil }
+	input: { move = {x,y}, aim = {x,y} | nil, point = {x,y} | nil, buttons = { pass = true, ... },
+	         flick = {x,y} | nil, cmd = string | nil }
+	point はマウスが指すピッチ上の地点 [m] (10cm 単位で送る)。
 ]]
 function Snapshot.packInput(input)
 	local mask = 0
@@ -217,22 +219,28 @@ function Snapshot.packInput(input)
 			mask += 2 ^ (i - 1)
 		end
 	end
-	local hasAim = input.aim ~= nil
+	local flags = (input.aim ~= nil and 1 or 0) + (input.point ~= nil and 2 or 0)
 	local ax, ay = 0, 0
-	if hasAim then
+	if input.aim ~= nil then
 		ax, ay = input.aim.x, input.aim.y
+	end
+	local px, py = 0, 0
+	if input.point ~= nil then
+		px, py = input.point.x, input.point.y
 	end
 	local fx, fy = 0, 0
 	if input.flick then
 		fx, fy = input.flick.x, input.flick.y
 	end
 	return string.pack(
-		"<bbBbbBbbs1",
+		"<bbBbbhhBbbs1",
 		q(input.move.x, 127, -127, 127),
 		q(input.move.y, 127, -127, 127),
-		hasAim and 1 or 0,
+		flags,
 		q(ax, 127, -127, 127),
 		q(ay, 127, -127, 127),
+		q(px, 10, -32768, 32767),
+		q(py, 10, -32768, 32767),
 		mask,
 		q(fx, 127, -127, 127),
 		q(fy, 127, -127, 127),
@@ -241,10 +249,10 @@ function Snapshot.packInput(input)
 end
 
 function Snapshot.unpackInput(str)
-	if type(str) ~= "string" or #str < 9 or #str > 64 then
+	if type(str) ~= "string" or #str < 13 or #str > 64 then
 		return nil
 	end
-	local ok, mx, my, hasAim, ax, ay, mask, fx, fy, cmd = pcall(string.unpack, "<bbBbbBbbs1", str)
+	local ok, mx, my, flags, ax, ay, px, py, mask, fx, fy, cmd = pcall(string.unpack, "<bbBbbhhBbbs1", str)
 	if not ok then
 		return nil
 	end
@@ -256,7 +264,8 @@ function Snapshot.unpackInput(str)
 	end
 	return {
 		move = { x = mx / 127, y = my / 127 },
-		aim = hasAim == 1 and { x = ax / 127, y = ay / 127 } or nil,
+		aim = bit32.band(flags, 1) ~= 0 and { x = ax / 127, y = ay / 127 } or nil,
+		point = bit32.band(flags, 2) ~= 0 and { x = px / 10, y = py / 10 } or nil,
 		buttons = buttons,
 		flick = (fx ~= 0 or fy ~= 0) and { x = fx / 127, y = fy / 127 } or nil,
 		cmd = cmd ~= "" and cmd or nil,
@@ -270,6 +279,11 @@ function Snapshot.applyInput(match, seatId, input, prevButtons)
 		match:setAim(seatId, input.aim.x, input.aim.y)
 	else
 		match:setAim(seatId, nil)
+	end
+	if input.point ~= nil then
+		match:setAimPoint(seatId, input.point.x, input.point.y)
+	else
+		match:setAimPoint(seatId, nil)
 	end
 	-- 押した順を保つため、修飾ボタン (l1/r1/dash/l2) を先に処理する
 	local order = { "dash", "l1", "r1", "l2", "pass", "through", "lofted", "shoot" }

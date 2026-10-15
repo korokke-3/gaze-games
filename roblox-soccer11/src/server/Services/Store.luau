@@ -176,6 +176,8 @@ local SETTING_KEYS = {
 	press = "number",
 	camera = "number",
 	night = "boolean",
+	assist = "number",
+	mouseAim = "boolean",
 }
 
 function Store.saveSettings(player: Player, raw: any)

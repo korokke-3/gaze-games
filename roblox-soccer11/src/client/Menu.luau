@@ -122,6 +122,11 @@ local function buildOptions(lang)
 			},
 		},
 		{
+			id = "mouseAim",
+			title = t("menu.aim"),
+			values = { { value = true, text = t("opt.aim.mouse") }, { value = false, text = t("opt.aim.keys") } },
+		},
+		{
 			id = "camera",
 			title = t("menu.camera"),
 			values = {
@@ -148,6 +153,7 @@ local DEFAULTS = {
 	camera = 2,
 	night = false,
 	assist = Config.Controls.DefaultAssist,
+	mouseAim = true,
 }
 
 --[[

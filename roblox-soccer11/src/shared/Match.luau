@@ -150,6 +150,7 @@ local function newSeat(id, team)
 		ctrl = nil,
 		move = { x = 0, y = 0 },
 		aim = nil,
+		aimPoint = nil, -- 狙う地点 (マウスが指すピッチ上の点)
 		buttons = {}, -- 押している論理ボタン
 		charge = nil, -- { btn, t0, mods, firstTime }
 		queued = nil, -- ダイレクトで蹴る予約 { btn, power, mods, untilT }
@@ -460,6 +461,12 @@ end
 
 --- 狙いの方向 (マウス等の狙い → 左スティック → 選手の向き)。
 function Match:aimOf(s)
+	if s.aimPoint ~= nil and s.ctrl ~= nil then
+		local d = vsub(s.aimPoint, s.ctrl.p)
+		if vlen(d) > 0.5 then
+			return vnorm(d)
+		end
+	end
 	if s.aim ~= nil and vlen(s.aim) > 0.1 then
 		return vnorm(s.aim)
 	end
@@ -491,6 +498,19 @@ function Match:setMove(id, x, y)
 	s.move = v
 	if n > CTRL.DeadZone then
 		s.lastInputT = self.elapsed
+	end
+end
+
+--- 狙う地点 (マウス)。nil で解除。パスは指した味方へ、空いたスペースならその地点へ蹴る。
+function Match:setAimPoint(id, x, y)
+	local s = self.seatById[id]
+	if s == nil then
+		return
+	end
+	if x == nil then
+		s.aimPoint = nil
+	else
+		s.aimPoint = { x = clamp(x, -PL / 2 - 5, PL / 2 + 5), y = clamp(y, -PW / 2 - 5, PW / 2 + 5) }
 	end
 end
 
@@ -611,7 +631,7 @@ function Match:press(id, btn)
 	elseif btn == "shoot" then
 		self:shoulderOrClear(p)
 	elseif btn == "l1" then
-		local nxt = self:nextCursor(s)
+		local nxt = s.aimPoint ~= nil and self:nearestFree(s, s.aimPoint) or self:nextCursor(s)
 		if nxt ~= nil then
 			self:assign(s, nxt)
 		end
@@ -913,6 +933,63 @@ function Match:chooseReceiver(p, kind, dir, power)
 	return best
 end
 
+--- 指した地点に一番近い、操作されていない味方 (GK 以外)。
+function Match:nearestFree(s, pt)
+	local best, bd = nil, math.huge
+	for _, m in self:active(s.team) do
+		if m ~= s.ctrl and m.seat == nil and not m.gk then
+			local d = vdist(m.p, pt)
+			if d < bd then
+				best, bd = m, d
+			end
+		end
+	end
+	return best
+end
+
+--[[
+	パスの受け手と行き先を決める。
+	  狙う地点 (マウス) がある: 地点の近くの味方へ。空いたスペースなら地点へ蹴る
+	    (スルーなら、一番近い味方がそこへ走り込む受け手になる)
+	  無い: 狙いの向き + パワーで受け手を探す (eFootball のスティック操作)
+	戻り値: recv (受け手 or nil), dest (地点へ直接蹴る時の行き先 or nil)
+]]
+function Match:selectTarget(s, btn, power)
+	local p = s.ctrl
+	local base = btn == "lofted" and "lofted" or btn
+	local pt = s.aimPoint
+	if pt ~= nil then
+		if self.assist > 0 then
+			local best, bd = nil, CTRL.PointSnap
+			for _, m in self:active(p.team) do
+				if m ~= p then
+					local d = vdist(vadd(m.p, vmul(m.v, 0.4)), pt)
+					if d < bd then
+						best, bd = m, d
+					end
+				end
+			end
+			if best ~= nil then
+				return best, nil
+			end
+		end
+		local runner = nil
+		if base == "through" then
+			local rd = CTRL.ThroughReach
+			for _, m in self:active(p.team) do
+				if m ~= p and not m.gk then
+					local d = vdist(m.p, pt)
+					if d < rd then
+						runner, rd = m, d
+					end
+				end
+			end
+		end
+		return runner, { x = pt.x, y = pt.y }
+	end
+	return self:chooseReceiver(p, base, self:aimOf(s), power), nil
+end
+
 --- パスのプレビュー (溜め中の受け手)。HUD の表示用。
 function Match:previewReceiver(s)
 	if s == nil or s.charge == nil or s.ctrl == nil then
@@ -922,8 +999,8 @@ function Match:previewReceiver(s)
 	if kind == "shoot" then
 		return nil
 	end
-	local power = self:chargePower(s) or 0
-	return self:chooseReceiver(s.ctrl, kind, self:aimOf(s), power)
+	local recv = self:selectTarget(s, kind, self:chargePower(s) or 0)
+	return recv
 end
 
 --- 人間のキック。btn: pass / through / lofted / shoot。power 0..1。
@@ -958,12 +1035,13 @@ function Match:doKick(s, btn, power, mods)
 	if btn == "through" and mods.l1 then
 		kind = "lthrough"
 	end
-	local recv = self:chooseReceiver(p, btn == "lofted" and "lofted" or btn, dir, power)
+	local recv, dest = self:selectTarget(s, btn, power)
 	self:kick(kind, {
 		c = p,
 		dir = dir,
 		power = power,
 		target = recv,
+		dest = dest,
 		stun = mods.stun,
 		manual = recv == nil,
 		curl = mods.curl,
@@ -1091,7 +1169,9 @@ function Match:kick(kind, o)
 		local lofted = kind == "lofted" or kind == "lthrough"
 		local tgt = o.target
 		local dest
-		if tgt ~= nil then
+		if o.dest ~= nil then
+			dest = { x = o.dest.x, y = o.dest.y } -- 指した地点へ直接
+		elseif tgt ~= nil then
 			local lead = ({ pass = 0.4, lofted = 0.9, through = 1.0, lthrough = 1.1 })[kind]
 			dest = vadd(tgt.p, vmul(tgt.v, lead))
 			if kind == "through" or kind == "lthrough" then
@@ -1106,8 +1186,11 @@ function Match:kick(kind, o)
 			dest = vadd(c.p, vmul(vnorm(dir), lerp(range[1], range[2], power)))
 		end
 		-- 補助の強さ: パワーの影響 (マニュアル寄りほど、パワーで距離が変わる)
-		if tgt ~= nil and o.power ~= nil and o.dir ~= nil then
+		if (tgt ~= nil or o.dest ~= nil) and o.power ~= nil and o.dir ~= nil then
 			local wPower = CTRL.AssistPowerWeight[self.assist + 1] or 0.5
+			if o.dest ~= nil then
+				wPower *= 0.5 -- 地点を指した時は、距離は主に地点で決まる
+			end
 			local range = PASS_RANGE[kind == "lthrough" and "through" or kind] or PASS_RANGE.pass
 			local dPow = lerp(range[1], range[2], power)
 			local d0 = vdist(dest, c.p)
@@ -1134,7 +1217,9 @@ function Match:kick(kind, o)
 			b.v = vmul(u, dist / T)
 			b.z, b.vz = 0.1, 0.5 * GRAV * T
 		else
-			local v0 = math.sqrt(2 * FRICTION * dist) + 3.5
+			-- 受け手へは勢いを残して届ける。空いた地点へは、そこで止まる程度に
+			local arrive = (tgt == nil and o.dest ~= nil) and 1.0 or 3.5
+			local v0 = math.sqrt(2 * FRICTION * dist) + arrive
 			b.v = vmul(u, math.min(v0, 28.0))
 			b.z, b.vz = 0, 0
 		end
@@ -1506,6 +1591,12 @@ function Match:aiDriven(p)
 	return p.seat == nil or not self:seatActive(p.seat)
 end
 
+--- 人間がスティックを倒して動かしている選手か。
+function Match:steering(p)
+	local s = p.seat
+	return s ~= nil and vlen(s.move) > CTRL.DeadZone and self:seatActive(s)
+end
+
 --- チームの陣形と、守備の寄せ役 (操作中の選手以外の AI が必ず 1 人寄せる)。
 function Match:shapeTargets()
 	local b = self.ball
@@ -1645,8 +1736,8 @@ function Match:planChasers()
 			if p.gk and not (math.abs(b.p.x) > PL / 2 - BOX_L and sgnOf(b.p.x) == -self:sgn(team)) then
 				skip = true
 			end
-			if not self:aiDriven(p) and b.target ~= p then
-				skip = true -- 操作中で入力のある選手は人間に任せる
+			if self:steering(p) then
+				skip = true -- 人間が動かしている選手は任せる
 			end
 			if not skip then
 				for _, f in fut do
@@ -1663,7 +1754,7 @@ function Match:planChasers()
 			end
 		end
 		local tgt = b.target
-		if tgt ~= nil and tgt.team == team and self:aiDriven(tgt) then
+		if tgt ~= nil and tgt.team == team and not self:steering(tgt) then
 			-- パスの受け手: 届く最初の点へ (届かなければ一番近い点へ)
 			local q = targetReach and targetReach.q
 			if q == nil then

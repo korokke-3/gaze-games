@@ -7,11 +7,13 @@
 	  Input.localSink(match, seatId)  ソロ: 手元の Match へ直接
 	  Input.netSink(send)             オンライン: サーバーへ (ボタンの変化は即時、移動・狙いは 20 回/秒)
 
-	キーボード (PlayStation の配置に対応):
-	  WASD = 左スティック / マウス = 狙い (360°) / Shift = R2 (ダッシュ・強いキック)
-	  K or 左クリック = × (パス / プレッシャー) / I = △ (スルー / GK 飛び出し) / L = ○ (浮き球 / スライディング)
-	  J or 右クリック = □ (シュート / ショルダーチャージ) / Q = L1 / E = R1 / F = L2 (マッチアップ)
-	  矢印 = 右スティック (フェイント / 方向指定の切替 / カーブ) / Z・C = 攻守レベル / P = 一時停止 / H = 操作表示
+	PC はマウス中心 (マウスで指した所が狙い。指した味方へパス、スペースならそこへ):
+	  WASD = 移動 / マウス = 狙う地点 / ホイール = ズーム / Shift = R2 (ダッシュ・強いキック)
+	  左クリック = × (パス / プレッシャー)  右クリック = □ (シュート / ショルダーチャージ)
+	  Space or ホイールクリック = △ (スルー / GK 飛び出し)  E = ○ (浮き球・クロス / スライディング)
+	  Q = L1 (修飾 / マウスに近い味方へ切替)  R = R1 (修飾 / 2 人目のプレス)  F = L2 (マッチアップ)
+	  矢印 = 右スティック (フェイント / カーブ)  Z・C = 攻守レベル  P = 一時停止  H = 操作表示
+	  キーボードだけでも遊べる: K = ×, I = △, L = ○, J = □ (狙いは WASD)
 ]]
 
 local UserInputService = game:GetService("UserInputService")
@@ -23,9 +25,11 @@ local Locale = require(Shared:WaitForChild("Locale"))
 local Snapshot = require(Shared:WaitForChild("Snapshot"))
 
 local S = Config.View.Studs
-local MOUSE_AIM_HOLD = 3.0 -- マウスを動かしてから、この秒数は狙いをマウスで決める
 
 local KEY_BUTTON = {
+	Space = "through",
+	E = "lofted",
+	R = "r1",
 	K = "pass",
 	I = "through",
 	L = "lofted",
@@ -33,7 +37,6 @@ local KEY_BUTTON = {
 	LeftShift = "dash",
 	RightShift = "dash",
 	Q = "l1",
-	E = "r1",
 	F = "l2",
 	-- ゲームパッド
 	ButtonA = "pass",
@@ -73,6 +76,9 @@ function Input.localSink(match, seatId)
 		setAim = function(_, x, y)
 			match:setAim(seatId, x, y)
 		end,
+		setAimPoint = function(_, x, y)
+			match:setAimPoint(seatId, x, y)
+		end,
 		press = function(_, b)
 			match:press(seatId, b)
 		end,
@@ -91,11 +97,12 @@ end
 
 --- send(packet: string) でサーバーへ送る。
 function Input.netSink(send)
-	local st = { move = { x = 0, y = 0 }, aim = nil, buttons = {}, dirty = false, acc = 0, keep = 0 }
+	local st = { move = { x = 0, y = 0 }, aim = nil, point = nil, buttons = {}, dirty = false, acc = 0, keep = 0 }
 	local function flush(extra)
 		local packet = Snapshot.packInput({
 			move = st.move,
 			aim = st.aim,
+			point = st.point,
 			buttons = st.buttons,
 			flick = extra and extra.flick,
 			cmd = extra and extra.cmd,
@@ -126,6 +133,17 @@ function Input.netSink(send)
 						st.dirty = true
 					end
 				end
+			end
+		end,
+		setAimPoint = function(_, x, y)
+			if x == nil then
+				if st.point ~= nil then
+					st.point = nil
+					st.dirty = true
+				end
+			elseif st.point == nil or math.abs(x - st.point.x) + math.abs(y - st.point.y) > 0.2 then
+				st.point = { x = x, y = y }
+				st.dirty = true
 			end
 		end,
 		press = function(_, b)
@@ -161,6 +179,8 @@ end
 	  ctrlPos: () -> { x, y } | nil  操作中の選手の位置 (マウスの狙いの計算用)
 	  onToggleHelp: () -> ()
 	  onDevice: (device: "keyboard" | "gamepad" | "touch") -> ()
+	  onZoom: (delta: number) -> ()  マウスホイール
+	  mouseAim: boolean  PC でマウスを狙いに使う (既定 true)
 	  allowPause: boolean
 	}
 ]]
@@ -246,14 +266,14 @@ function Input:_began(input, processed)
 		end
 		self.keysDown[name] = true
 		self:_key(name, true)
-	elseif t == Enum.UserInputType.MouseButton1 or t == Enum.UserInputType.MouseButton2 then
+	elseif t == Enum.UserInputType.MouseButton1 or t == Enum.UserInputType.MouseButton2 or t == Enum.UserInputType.MouseButton3 then
 		if processed then
 			return
 		end
 		self:_setDevice("keyboard")
 		self.mouseHeld = true
 		self.lastMouseMove = self.clock
-		self:_buttonDown(t == Enum.UserInputType.MouseButton1 and "pass" or "shoot")
+		self:_buttonDown(self:_mouseButton(t))
 	elseif t == Enum.UserInputType.Gamepad1 then
 		self:_setDevice("gamepad")
 		local name = input.KeyCode.Name
@@ -273,9 +293,9 @@ function Input:_ended(input)
 		local name = input.KeyCode.Name
 		self.keysDown[name] = nil
 		self:_key(name, false)
-	elseif t == Enum.UserInputType.MouseButton1 or t == Enum.UserInputType.MouseButton2 then
+	elseif t == Enum.UserInputType.MouseButton1 or t == Enum.UserInputType.MouseButton2 or t == Enum.UserInputType.MouseButton3 then
 		self.mouseHeld = false
-		self:_buttonUp(t == Enum.UserInputType.MouseButton1 and "pass" or "shoot")
+		self:_buttonUp(self:_mouseButton(t))
 	elseif t == Enum.UserInputType.Gamepad1 then
 		self:_key(input.KeyCode.Name, false)
 	elseif t == Enum.UserInputType.Touch and self.touch then
@@ -283,10 +303,24 @@ function Input:_ended(input)
 	end
 end
 
+function Input:_mouseButton(t)
+	if t == Enum.UserInputType.MouseButton1 then
+		return "pass"
+	elseif t == Enum.UserInputType.MouseButton2 then
+		return "shoot"
+	end
+	return "through"
+end
+
 function Input:_changed(input, processed)
 	local t = input.UserInputType
 	if t == Enum.UserInputType.MouseMovement then
 		self.lastMouseMove = self.clock
+		self:_setDevice("keyboard")
+	elseif t == Enum.UserInputType.MouseWheel then
+		if not processed and self.opts.onZoom then
+			self.opts.onZoom(input.Position.Z)
+		end
 	elseif t == Enum.UserInputType.Gamepad1 then
 		local name = input.KeyCode.Name
 		local pos = input.Position
@@ -357,25 +391,31 @@ function Input:update(dt)
 	end
 	self.sink:setMove(mx, my)
 	self.lastMove = { x = mx, y = my }
-	-- 狙い: マウスを最近動かした / クリック中なら、選手からマウスの指す地点への向き
-	local aim = nil
-	if self.device == "keyboard" and (self.mouseHeld or self.clock - self.lastMouseMove < MOUSE_AIM_HOLD) then
-		aim = self:_mouseAim()
+	-- 狙い: PC はマウスの指す地点 (常に)。パッド・タッチは左スティックの向き
+	local point = nil
+	if self.device == "keyboard" and self.opts.mouseAim ~= false and UserInputService.MouseEnabled ~= false then
+		point = self:_mousePoint()
 	end
-	if aim ~= nil then
-		self.sink:setAim(aim.x, aim.y)
+	if point ~= nil then
+		self.sink:setAimPoint(point.x, point.y)
 	else
-		self.sink:setAim(nil)
+		self.sink:setAimPoint(nil)
 	end
-	self.lastAim = aim
+	self.sink:setAim(nil)
+	self.point = point
+	local pos = self.opts.ctrlPos and self.opts.ctrlPos()
+	if point ~= nil and pos ~= nil then
+		self.lastAim = { x = point.x - pos.x, y = point.y - pos.y }
+	else
+		self.lastAim = nil
+	end
 	self.sink:tick(dt)
 end
 
---- マウスが指すピッチ上の点への向き (操作中の選手から)。
-function Input:_mouseAim()
+--- マウスが指すピッチ上の点 [m]。
+function Input:_mousePoint()
 	local cam = workspace.CurrentCamera
-	local pos = self.opts.ctrlPos and self.opts.ctrlPos()
-	if cam == nil or pos == nil then
+	if cam == nil then
 		return nil
 	end
 	local m = UserInputService:GetMouseLocation()
@@ -388,12 +428,12 @@ function Input:_mouseAim()
 		return nil
 	end
 	local hit = ray.Origin + ray.Direction * t
-	local px, py = hit.X / S, hit.Z / S
-	local dx, dy = px - pos.x, py - pos.y
-	if math.sqrt(dx * dx + dy * dy) < 0.5 then
-		return nil
-	end
-	return { x = dx, y = dy }
+	return { x = hit.X / S, y = hit.Z / S }
+end
+
+--- 画面に出す照準の地点 (PC のみ)。
+function Input:currentPoint()
+	return self.point
 end
 
 --- 画面に出す狙い (マウス or スティック)。World の矢印表示に使う。

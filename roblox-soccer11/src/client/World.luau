@@ -270,7 +270,17 @@ function World.new(match, lang, style)
 		Material = Enum.Material.Neon,
 		Transparency = 0.45,
 	}, self.folder)
+	-- マウスの照準 (指している地点)
+	self.reticle = newPart({
+		Name = "Reticle",
+		Shape = Enum.PartType.Cylinder,
+		Size = Vector3.new(0.08, 2.4, 2.4),
+		Color = Color3.fromRGB(255, 255, 255),
+		Material = Enum.Material.Neon,
+		Transparency = 0.35,
+	}, self.folder)
 	self.hidden = Vector3.new(0, -500, 0)
+	self.zoomHalf = nil
 
 	local m = match.ball.p
 	self.focus = Vector3.new(m.x * S, 0, m.y * S)
@@ -287,6 +297,14 @@ function World:colorFor(pl)
 		return pl.gk and Config.View.HomeKeeperColor or Config.View.HomeColor
 	end
 	return pl.gk and Config.View.AwayKeeperColor or Config.View.AwayColor
+end
+
+--- マウスホイールでズーム (上で寄る、下で引く)。
+function World:zoom(delta)
+	local V = Config.View
+	local range = Config.Controls.ZoomRange
+	local cur = self.zoomHalf or V.CameraPresets[self.style.camera or 2] or V.HalfWidth
+	self.zoomHalf = math.clamp(cur - delta * 3, range[1], range[2])
 end
 
 function World:destroy()
@@ -395,6 +413,11 @@ function World:step(dt, view)
 		self.aimArrow.Position = self.hidden
 		self.aimHead.Position = self.hidden
 	end
+	if view.point ~= nil and myCtrl ~= nil then
+		self.reticle.CFrame = CFrame.new(toWorld(view.point.x, view.point.y, 0.14)) * CFrame.Angles(0, 0, math.rad(90))
+	else
+		self.reticle.Position = self.hidden
+	end
 	local recv = me and match:previewReceiver(me)
 	if recv ~= nil and not recv.out then
 		self.targetRing.CFrame = CFrame.new(toWorld(recv.p.x, recv.p.y, 0.1)) * CFrame.Angles(0, 0, math.rad(90))
@@ -413,7 +436,7 @@ function World:updateCamera(dt)
 		cam.CameraType = Enum.CameraType.Scriptable
 	end
 	local V = Config.View
-	local half = V.CameraPresets[self.style.camera or 2] or V.HalfWidth
+	local half = self.zoomHalf or V.CameraPresets[self.style.camera or 2] or V.HalfWidth
 	local b = self.match.ball.p
 	local limX = math.max(0, PL / 2 + 4 - half)
 	local limY = math.max(0, PW / 2 + 4 - V.HalfHeight)
