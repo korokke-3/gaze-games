@@ -1,0 +1,11 @@
+# 個人データ (顔の録画・較正データ・目の特徴量・自己ベスト) は公開しない
+profiles/
+# 講義資料 (著作物)
+*.pdf
+# 環境・キャッシュ・生成物
+.venv/
+__pycache__/
+*.pyc
+screenshot_*.png
+drawing_*.png
+tests/_m.json

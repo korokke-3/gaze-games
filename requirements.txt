@@ -1,0 +1,8 @@
+# Ubuntu 20.04 (Python 3.8) / 22.04 / 24.04 で動作。pip が対応バージョンを自動選択する。
+mediapipe>=0.10.9,<0.10.22
+opencv-contrib-python>=4.5     # mediapipe が依存するため contrib 版に統一
+numpy>=1.19,<2
+python-xlib>=0.29              # 実PC操作 (X11 / XTest でカーソル移動・クリック)
+mss>=6.0                       # ズームクリック用の画面キャプチャ
+jeepney>=0.7                   # Wayland での画面取得 (XDG portal) 用の純Python D-Bus
+Pillow>=7.0                    # 日本語テキスト描画 (Noto Sans CJK)
