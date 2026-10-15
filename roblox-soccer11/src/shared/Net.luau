@@ -15,11 +15,24 @@ local EVENTS = {
 	"EquipItem", -- (kind: "kit" | "ball", id: string)
 	"PromptPurchase", -- (kind: "pass" | "product", key: string)
 	"SaveSettings", -- (settings: table)
+	"RoomList", -- ()
+	"RoomCreate", -- (mode: "coop" | "versus", opts: table)
+	"RoomJoin", -- (id: number)
+	"RoomLeave", -- ()
+	"RoomTeam", -- (team: 0 | 1)
+	"RoomOpts", -- (opts: table)  ホストだけ
+	"RoomStart", -- ()  ホストだけ
+	"MatchInput", -- (packet: string)  Snapshot.packInput
 
 	-- server -> client
 	"State", -- (state: table)  自分の完全な状態
 	"MatchReward", -- (reward: { coins, parts, total })
 	"Notify", -- (key: string, arg: any?)
+	"Rooms", -- (list: table)
+	"RoomState", -- (room: table | nil)
+	"OnlineStart", -- (info: table)
+	"OnlineSnap", -- (snapshot: string)
+	"OnlineEnd", -- (info: { result, reward, myTeam, aborted })
 }
 
 local Net = {}

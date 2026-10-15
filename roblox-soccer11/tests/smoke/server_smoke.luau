@@ -160,6 +160,137 @@ Check("他サーバーのロック中は読み取り専用になる", s4 ~= nil 
 Fire("PlayerRemoving", p2)
 Check("ロック中のデータを上書きしない", DataStoreMemory["u_2"].data.coins == 777 and DataStoreMemory["u_2"].lock.jobId == "other-server")
 
+-- ================================================================ オンライン (協力 / 対戦)
+print("-- オンライン --")
+local Snapshot = Require(Shared.Snapshot)
+local function lastOf(player, name)
+	local out = nil
+	for _, c in Calls do
+		if c.name == name and c.player == player then
+			out = c
+		end
+	end
+	return out
+end
+local function countOf(player, name)
+	local n = 0
+	for _, c in Calls do
+		if c.name == name and c.player == player then
+			n += 1
+		end
+	end
+	return n
+end
+local a = newPlayer(41)
+local b = newPlayer(42)
+local c3 = newPlayer(43)
+join(a)
+join(b)
+join(c3)
+NetFire("RoomCreate", a, "coop", { length = 180, difficulty = 2, cup = false, formation = "442", assist = 2 })
+local rs = lastOf(a, "RoomState")
+Check("協力の部屋を作れる", rs ~= nil and rs.args[1] ~= nil and rs.args[1].mode == "coop" and rs.args[1].count == 1)
+local roomId = rs.args[1].id
+NetFire("RoomJoin", b, roomId)
+NetFire("RoomJoin", c3, roomId)
+local rsb = lastOf(b, "RoomState")
+Check("3 人まで参加できる", rsb and rsb.args[1].count == 3)
+local d = newPlayer(44)
+join(d)
+NetFire("RoomJoin", d, roomId)
+Check("協力は 4 人目を断る", lastOf(d, "RoomState") == nil)
+NetFire("RoomStart", b)
+Check("ホスト以外は開始できない", lastOf(a, "OnlineStart") == nil)
+NetFire("RoomStart", a)
+local st = lastOf(b, "OnlineStart")
+Check("ホストが開始すると全員に開始が届く", st ~= nil and lastOf(c3, "OnlineStart") ~= nil and #st.args[1].seats == 3)
+Check("協力は全員ホームチーム", st and st.args[1].seats[1].team == 0 and st.args[1].seats[3].team == 0)
+-- 試合を進めながら入力を送る
+local snaps0 = countOf(a, "OnlineSnap")
+local okT, errT = pcall(function()
+	for i = 1, 60 do
+		FakeClock += 1 / 60
+		Fire("Heartbeat", 1 / 60)
+		if i == 10 then
+			local packet = Snapshot.packInput({ move = { x = 1, y = 0 }, aim = { x = 1, y = 0 }, buttons = { pass = true } })
+			NetFire("MatchInput", a, packet)
+		end
+		if i == 30 then
+			local packet = Snapshot.packInput({ move = { x = 1, y = 0 }, aim = { x = 1, y = 0 }, buttons = {} })
+			NetFire("MatchInput", a, packet)
+		end
+	end
+end)
+Check("サーバーで試合が進む (Heartbeat)", okT, errT)
+Check("Snapshot が送られる (15 回/秒前後)", countOf(a, "OnlineSnap") - snaps0 >= 10, countOf(a, "OnlineSnap") - snaps0)
+local snap = Snapshot.decode(lastOf(a, "OnlineSnap").args[1])
+Check("Snapshot に 3 人の操作者", #snap.seats == 3)
+NetFire("MatchInput", a, "garbage")
+NetFire("MatchInput", a, 12345)
+Check("壊れた入力でも落ちない", true)
+-- 終了まで (3 分)
+local okE, errE = pcall(function()
+	for _ = 1, 60 * 200 do
+		FakeClock += 1 / 60
+		Fire("Heartbeat", 1 / 60)
+		if lastOf(a, "OnlineEnd") ~= nil then
+			break
+		end
+	end
+end)
+local fin = lastOf(a, "OnlineEnd")
+Check("試合が終わると結果が届く", okE and fin ~= nil, errE)
+Check("結果は数値キーの辞書を含まない (RemoteEvent で送れる形)", fin and fin.args[1].result.statsHome ~= nil and fin.args[1].result[0] == nil)
+Check("規定時間を満たせば報酬が付く", fin and fin.args[1].reward ~= nil and fin.args[1].reward.coins > 0)
+local rsAfter = lastOf(a, "RoomState")
+Check("試合後は部屋の待機に戻る", rsAfter and rsAfter.args[1].state == "lobby")
+
+-- 対戦
+NetFire("RoomLeave", b)
+NetFire("RoomLeave", c3)
+NetFire("RoomCreate", b, "versus", { length = 180 })
+local vs = lastOf(b, "RoomState").args[1]
+NetFire("RoomStart", b)
+Check("対戦は相手がいないと開始できない", lastOf(b, "Notify").args[1] == "notify.need_opponent")
+NetFire("RoomJoin", c3, vs.id)
+local vs2 = lastOf(c3, "RoomState").args[1]
+local teams = {}
+for _, m in vs2.members do
+	teams[m.name] = m.team
+end
+Check("対戦の 2 人目は相手チーム", teams["P42"] == 0 and teams["P43"] == 1)
+NetFire("RoomTeam", c3, 0)
+Check("チームを移動できる", (function()
+	for _, m in lastOf(c3, "RoomState").args[1].members do
+		if m.name == "P43" then
+			return m.team == 0
+		end
+	end
+	return false
+end)())
+NetFire("RoomTeam", c3, 1)
+NetFire("RoomStart", b)
+Check("対戦が始まる", lastOf(c3, "OnlineStart") ~= nil and lastOf(c3, "OnlineStart").args[1].mode == "versus")
+for _ = 1, 30 do
+	FakeClock += 1 / 60
+	Fire("Heartbeat", 1 / 60)
+end
+-- 途中退出: 片方が抜けると試合は終わる
+NetFire("RoomLeave", c3)
+local abort = lastOf(b, "OnlineEnd")
+Check("対戦の相手が抜けたら試合を終える (報酬なし)", abort ~= nil and abort.args[1].aborted == true and abort.args[1].reward == nil)
+Fire("PlayerRemoving", b)
+Check("退出で部屋が消える", (function()
+	NetFire("RoomList", a)
+	local list = lastOf(a, "Rooms").args[1]
+	for _, r in list do
+		if r.id == vs.id then
+			return false
+		end
+	end
+	return true
+end)())
+
 print(("== 結果: %d 失敗 =="):format(Failures))
 if Failures > 0 then
 	error("server smoke failed")

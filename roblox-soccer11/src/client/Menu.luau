@@ -113,6 +113,15 @@ local function buildOptions(lang)
 			},
 		},
 		{
+			id = "assist",
+			title = t("menu.assist"),
+			values = {
+				{ value = 0, text = t("opt.assist0") },
+				{ value = 1, text = t("opt.assist1") },
+				{ value = 2, text = t("opt.assist2") },
+			},
+		},
+		{
 			id = "camera",
 			title = t("menu.camera"),
 			values = {
@@ -138,6 +147,7 @@ local DEFAULTS = {
 	press = 2,
 	camera = 2,
 	night = false,
+	assist = Config.Controls.DefaultAssist,
 }
 
 --[[
@@ -188,7 +198,7 @@ function Menu.new(gui, lang, callbacks)
 		BackgroundTransparency = 1,
 		AnchorPoint = Vector2.new(0.5, 0),
 		Position = UDim2.new(0.5, 0, 0, 58),
-		Size = UDim2.fromOffset(320, 40),
+		Size = UDim2.fromOffset(480, 40),
 		ZIndex = 31,
 	}, self.root)
 	new("UIListLayout", {
@@ -196,7 +206,7 @@ function Menu.new(gui, lang, callbacks)
 		Padding = UDim.new(0, 10),
 		HorizontalAlignment = Enum.HorizontalAlignment.Center,
 	}, tabBar)
-	for _, id in { "play", "shop" } do
+	for _, id in { "play", "online", "shop" } do
 		local b = button(tabBar, Locale.t(lang, "menu." .. id), GREY, { Size = UDim2.fromOffset(150, 38), ZIndex = 32 })
 		b.Activated:Connect(function()
 			self:setPage(id)
@@ -291,6 +301,8 @@ function Menu:_render()
 	self:_clear()
 	if self.page == "play" then
 		self:_renderPlay()
+	elseif self.page == "online" then
+		self:_renderOnline()
 	else
 		self:_renderShop()
 	end
@@ -334,6 +346,148 @@ function Menu:_renderPlay()
 	start.Activated:Connect(function()
 		self.cb.onStart(self.opts)
 	end)
+end
+
+-- ================================================================ オンライン (協力 / 対戦)
+function Menu:_renderOnline()
+	local t = function(k, ...)
+		return Locale.t(self.lang, k, ...)
+	end
+	local room = self.room
+	if room ~= nil then
+		self:_header(t("online.room", room.id, t("online.mode." .. room.mode)))
+		label(self.scroll, t("online.settings", room.length / 60, t("diff." .. Config.Difficulties[room.difficulty].key), room.cup and t("menu.mode.cup") or t("menu.mode.quick")), {
+			Size = UDim2.new(1, 0, 0, 22),
+			TextSize = 14,
+			TextColor3 = Color3.fromRGB(180, 200, 190),
+			LayoutOrder = nextOrder(),
+			ZIndex = 32,
+		})
+		for _, m in room.members do
+			local row = self:_row(40)
+			local teamText = room.mode == "coop" and "" or ("[" .. t(m.team == 0 and "online.team.home" or "online.team.away") .. "] ")
+			label(row, teamText .. m.name .. (m.host and (" " .. t("online.host")) or ""), {
+				Position = UDim2.fromOffset(12, 0),
+				Size = UDim2.new(1, -24, 1, 0),
+				TextColor3 = m.team == 0 and Color3.fromRGB(140, 190, 255) or Color3.fromRGB(255, 150, 150),
+				ZIndex = 33,
+			})
+		end
+		local isHost = false
+		for _, m in room.members do
+			if m.host and m.userId == self.myId then
+				isHost = true
+			end
+		end
+		if room.mode == "versus" then
+			for _, team in { 0, 1 } do
+				local b = button(self.scroll, t(team == 0 and "online.to_home" or "online.to_away"), GREY, {
+					Size = UDim2.new(1, 0, 0, 38),
+					LayoutOrder = nextOrder(),
+					ZIndex = 32,
+				})
+				b.Activated:Connect(function()
+					self.cb.onRoomTeam(team)
+				end)
+			end
+		end
+		if isHost then
+			local apply = button(self.scroll, t("online.apply"), GREY, { Size = UDim2.new(1, 0, 0, 38), LayoutOrder = nextOrder(), ZIndex = 32 })
+			apply.Activated:Connect(function()
+				self.cb.onRoomOpts(self.opts)
+			end)
+			local start = button(self.scroll, t("online.start"), GREEN, {
+				Size = UDim2.new(1, 0, 0, 52),
+				TextSize = 22,
+				LayoutOrder = nextOrder(),
+				ZIndex = 32,
+			})
+			start.Activated:Connect(function()
+				self.cb.onRoomStart()
+			end)
+		else
+			label(self.scroll, t(room.state == "playing" and "online.playing" or "online.waiting"), {
+				Size = UDim2.new(1, 0, 0, 28),
+				TextXAlignment = Enum.TextXAlignment.Center,
+				LayoutOrder = nextOrder(),
+				ZIndex = 32,
+			})
+		end
+		local leave = button(self.scroll, t("online.leave"), Color3.fromRGB(150, 60, 60), {
+			Size = UDim2.new(1, 0, 0, 40),
+			LayoutOrder = nextOrder(),
+			ZIndex = 32,
+		})
+		leave.Activated:Connect(function()
+			self.cb.onRoomLeave()
+		end)
+		return
+	end
+	label(self.scroll, t("online.note"), {
+		Size = UDim2.new(1, 0, 0, 36),
+		TextSize = 14,
+		TextWrapped = true,
+		TextColor3 = Color3.fromRGB(180, 200, 190),
+		LayoutOrder = nextOrder(),
+		ZIndex = 32,
+	})
+	for _, mode in { "coop", "versus" } do
+		local b = button(self.scroll, t("online.create_" .. mode), GREEN, {
+			Size = UDim2.new(1, 0, 0, 46),
+			TextSize = 18,
+			LayoutOrder = nextOrder(),
+			ZIndex = 32,
+		})
+		b.Activated:Connect(function()
+			self.cb.onRoomCreate(mode, self.opts)
+		end)
+	end
+	self:_header(t("online.rooms"))
+	local rooms = self.rooms or {}
+	if #rooms == 0 then
+		label(self.scroll, t("online.none"), {
+			Size = UDim2.new(1, 0, 0, 26),
+			TextColor3 = Color3.fromRGB(180, 200, 190),
+			LayoutOrder = nextOrder(),
+			ZIndex = 32,
+		})
+	end
+	for _, r in rooms do
+		local row = self:_row(46)
+		label(row, string.format("#%d  %s  %s  (%d/%d)", r.id, t("online.mode." .. r.mode), r.host, r.count, r.cap), {
+			Position = UDim2.fromOffset(12, 0),
+			Size = UDim2.new(0.65, 0, 1, 0),
+			ZIndex = 33,
+		})
+		local canJoin = r.state == "lobby" and r.count < r.cap
+		local b = button(row, canJoin and t("online.join") or t("online.playing"), canJoin and GREEN or GREY, {
+			AnchorPoint = Vector2.new(1, 0.5),
+			Position = UDim2.new(1, -8, 0.5, 0),
+			Size = UDim2.fromOffset(130, 34),
+			ZIndex = 33,
+			Active = canJoin,
+			AutoButtonColor = canJoin,
+		})
+		if canJoin then
+			b.Activated:Connect(function()
+				self.cb.onRoomJoin(r.id)
+			end)
+		end
+	end
+end
+
+function Menu:setRooms(list)
+	self.rooms = list
+	if self.root.Visible and self.page == "online" then
+		self:_render()
+	end
+end
+
+function Menu:setRoom(room)
+	self.room = room
+	if self.root.Visible and self.page == "online" then
+		self:_render()
+	end
 end
 
 -- ================================================================ ショップ

@@ -190,12 +190,13 @@ function World.new(match, lang, style)
 		local num = billboard(body, UDim2.fromOffset(44, 22), Vector3.new(0, 2.6, 0))
 		newLabel(num, { Text = tostring(pl.num), TextColor3 = Color3.new(1, 1, 1) })
 
-		local cursor = billboard(body, UDim2.fromOffset(40, 30), Vector3.new(0, 5.2, 0))
-		newLabel(cursor, { Text = "▼", TextColor3 = Color3.fromRGB(255, 255, 120) })
+		-- 操作カーソル (自分 = 黄 / 味方の操作者 = 水色 / 相手の操作者 = 赤。名前つき)
+		local cursor = billboard(body, UDim2.fromOffset(160, 30), Vector3.new(0, 5.2, 0))
+		local cursorLabel = newLabel(cursor, { Text = "▼", TextColor3 = Color3.fromRGB(255, 255, 120) })
 		cursor.Enabled = false
 
-		local nextMark = billboard(body, UDim2.fromOffset(30, 22), Vector3.new(0, 5.0, 0))
-		newLabel(nextMark, { Text = "▽ U", TextColor3 = Color3.fromRGB(120, 230, 255) })
+		local nextMark = billboard(body, UDim2.fromOffset(40, 22), Vector3.new(0, 5.0, 0))
+		newLabel(nextMark, { Text = "▽", TextColor3 = Color3.fromRGB(120, 230, 255) })
 		nextMark.Enabled = false
 
 		local skill = billboard(body, UDim2.fromOffset(180, 30), Vector3.new(0, 7.5, 0))
@@ -207,6 +208,7 @@ function World.new(match, lang, style)
 			nose = nose,
 			shadow = shadow,
 			cursor = cursor,
+			cursorLabel = cursorLabel,
 			nextMark = nextMark,
 			skill = skill,
 			skillLabel = skillLabel,
@@ -245,6 +247,31 @@ function World.new(match, lang, style)
 		Color = Color3.fromRGB(25, 65, 25),
 	}, self.folder)
 
+	-- 狙いの矢印 (パス・シュートの向き。溜めるほど長い) と、パスの受け手の輪
+	self.aimArrow = newPart({
+		Name = "AimArrow",
+		Size = Vector3.new(0.5, 0.06, 4),
+		Color = Color3.fromRGB(255, 230, 80),
+		Material = Enum.Material.Neon,
+		Transparency = 0.25,
+	}, self.folder)
+	self.aimHead = newPart({
+		Name = "AimHead",
+		Size = Vector3.new(1.4, 0.06, 1.4),
+		Color = Color3.fromRGB(255, 230, 80),
+		Material = Enum.Material.Neon,
+		Transparency = 0.25,
+	}, self.folder)
+	self.targetRing = newPart({
+		Name = "TargetRing",
+		Shape = Enum.PartType.Cylinder,
+		Size = Vector3.new(0.08, 4.4, 4.4),
+		Color = Color3.fromRGB(255, 230, 80),
+		Material = Enum.Material.Neon,
+		Transparency = 0.45,
+	}, self.folder)
+	self.hidden = Vector3.new(0, -500, 0)
+
 	local m = match.ball.p
 	self.focus = Vector3.new(m.x * S, 0, m.y * S)
 	return self
@@ -267,12 +294,22 @@ function World:destroy()
 end
 
 --- 表示を Match の現在の状態に合わせる。
-function World:step(dt)
+--- view: { seatId, myTeam, aim = { x, y } | nil }
+function World:step(dt, view)
+	view = view or { seatId = 1, myTeam = 0 }
 	local match = self.match
-	local human = match:human(0)
 	local b = match.ball
-	local defending = human and (b.owner == nil or b.owner.team ~= 0)
-	local nxt = defending and match:nextCursor() or nil
+	local me = match:seat(view.seatId)
+	local myCtrl = me and me.ctrl
+	local myTeam = view.myTeam or 0
+	local defending = me ~= nil and (b.owner == nil or b.owner.team ~= myTeam)
+	local nxt = (defending and me ~= nil) and match:nextCursor(me) or nil
+	local owners = {}
+	for _, s in match.seats do
+		if s.ctrl ~= nil then
+			owners[s.ctrl] = s
+		end
+	end
 	local labelFor = {}
 	for _, lb in match.labels do
 		labelFor[lb.player] = lb
@@ -280,11 +317,9 @@ function World:step(dt)
 
 	for pl, a in self.actors do
 		if pl.out then
-			-- 退場した選手は画面から消す
-			local away = Vector3.new(0, -500, 0)
-			a.body.Position = away
-			a.nose.Position = away
-			a.shadow.Position = away
+			a.body.Position = self.hidden
+			a.nose.Position = self.hidden
+			a.shadow.Position = self.hidden
 			a.cursor.Enabled, a.nextMark.Enabled, a.skill.Enabled = false, false, false
 			continue
 		end
@@ -295,15 +330,29 @@ function World:step(dt)
 		local nosePos = pos + fwd * 1.7 + Vector3.new(0, 0.3, 0)
 		a.nose.CFrame = CFrame.lookAt(nosePos, nosePos + fwd)
 		a.shadow.CFrame = CFrame.new(toWorld(pl.p.x, pl.p.y, 0.08)) * CFrame.Angles(0, 0, math.rad(90))
-		if pl.slide > 0 then
+		if (pl.slide or 0) > 0 then
 			a.body.Color = Color3.new(1, 1, 1)
-		elseif pl.stun > 0 then
+		elseif (pl.stun or 0) > 0 then
 			a.body.Color = a.baseColor:Lerp(Color3.new(1, 1, 1), 0.5)
 		else
 			a.body.Color = a.baseColor
 		end
-		a.cursor.Enabled = human and pl == match.ctrl
-		a.nextMark.Enabled = pl == nxt and pl ~= match.ctrl
+		local owner = owners[pl]
+		if owner ~= nil then
+			a.cursor.Enabled = true
+			local isMe = owner.id == view.seatId
+			local name = owner.name
+			if isMe then
+				a.cursorLabel.Text = "▼"
+				a.cursorLabel.TextColor3 = Color3.fromRGB(255, 255, 120)
+			else
+				a.cursorLabel.Text = "▼ " .. (name or "")
+				a.cursorLabel.TextColor3 = owner.team == myTeam and Color3.fromRGB(120, 230, 255) or Color3.fromRGB(255, 110, 110)
+			end
+		else
+			a.cursor.Enabled = false
+		end
+		a.nextMark.Enabled = pl == nxt and pl ~= myCtrl
 		local lb = labelFor[pl]
 		if lb ~= nil then
 			a.skillLabel.Text = Locale.t(self.lang, lb.key)
@@ -319,6 +368,38 @@ function World:step(dt)
 	self.ballShadow.CFrame = CFrame.new(toWorld(b.p.x, b.p.y, 0.1)) * CFrame.Angles(0, 0, math.rad(90))
 	if self.trail then
 		self.trail.Enabled = math.sqrt(b.v.x * b.v.x + b.v.y * b.v.y) > 9
+	end
+
+	-- 狙いの矢印: ボールを持っている / 溜めている / セットプレーで蹴る時
+	local power = me and match:chargePower(me)
+	local showAim = myCtrl ~= nil
+		and not myCtrl.out
+		and (b.owner == myCtrl or power ~= nil or (match.setp ~= nil and match.setp.taker == myCtrl))
+	if showAim then
+		local aim = view.aim or match:aimOf(me)
+		local n = math.sqrt(aim.x * aim.x + aim.y * aim.y)
+		if n > 1e-6 then
+			local dir = Vector3.new(aim.x / n, 0, aim.y / n)
+			local len = (3 + 9 * (power or 0)) * S
+			local start = toWorld(myCtrl.p.x, myCtrl.p.y, 0.12) + dir * 1.8
+			local mid = start + dir * (len / 2)
+			self.aimArrow.Size = Vector3.new(0.5, 0.06, len)
+			self.aimArrow.CFrame = CFrame.lookAt(mid, mid + dir)
+			local tip = start + dir * len
+			self.aimHead.CFrame = CFrame.lookAt(tip, tip + dir) * CFrame.Angles(0, math.rad(45), 0)
+		else
+			showAim = false
+		end
+	end
+	if not showAim then
+		self.aimArrow.Position = self.hidden
+		self.aimHead.Position = self.hidden
+	end
+	local recv = me and match:previewReceiver(me)
+	if recv ~= nil and not recv.out then
+		self.targetRing.CFrame = CFrame.new(toWorld(recv.p.x, recv.p.y, 0.1)) * CFrame.Angles(0, 0, math.rad(90))
+	else
+		self.targetRing.Position = self.hidden
 	end
 end
 

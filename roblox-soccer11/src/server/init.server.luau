@@ -5,6 +5,7 @@
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Net = require(Shared:WaitForChild("Net")) -- RemoteEvent を生成する
@@ -13,6 +14,7 @@ local Data = require(script.Services.Data)
 local Store = require(script.Services.Store)
 local Matches = require(script.Services.Matches)
 local Monetization = require(script.Services.Monetization)
+local Rooms = require(script.Services.Rooms)
 
 Data.start()
 Monetization.start()
@@ -45,6 +47,7 @@ for _, p in Players:GetPlayers() do
 end
 
 Players.PlayerRemoving:Connect(function(player)
+	Rooms.remove(player)
 	Matches.remove(player)
 	Store.remove(player)
 	lastCall[player] = nil
@@ -54,7 +57,49 @@ end)
 Net.event("RequestState").OnServerEvent:Connect(function(player)
 	if not throttled(player, "state", 0.5) then
 		Store.push(player)
+		Net.event("Rooms"):FireClient(player, Rooms.list())
 	end
+end)
+
+-- ================================================================ オンライン (協力 / 対戦)
+Net.event("RoomList").OnServerEvent:Connect(function(player)
+	if not throttled(player, "roomlist", 0.5) then
+		Net.event("Rooms"):FireClient(player, Rooms.list())
+	end
+end)
+Net.event("RoomCreate").OnServerEvent:Connect(function(player, mode, opts)
+	if not throttled(player, "room", 0.5) then
+		Rooms.create(player, mode, opts)
+	end
+end)
+Net.event("RoomJoin").OnServerEvent:Connect(function(player, id)
+	if typeof(id) == "number" and not throttled(player, "room", 0.5) then
+		Rooms.join(player, id)
+	end
+end)
+Net.event("RoomLeave").OnServerEvent:Connect(function(player)
+	Rooms.leave(player)
+end)
+Net.event("RoomTeam").OnServerEvent:Connect(function(player, team)
+	if not throttled(player, "room", 0.3) then
+		Rooms.setTeam(player, team)
+	end
+end)
+Net.event("RoomOpts").OnServerEvent:Connect(function(player, opts)
+	if not throttled(player, "roomopts", 0.3) then
+		Rooms.setOpts(player, opts)
+	end
+end)
+Net.event("RoomStart").OnServerEvent:Connect(function(player)
+	if not throttled(player, "room", 0.5) then
+		Rooms.start(player)
+	end
+end)
+Net.event("MatchInput").OnServerEvent:Connect(function(player, packet)
+	Rooms.input(player, packet)
+end)
+RunService.Heartbeat:Connect(function(dt)
+	Rooms.tick(dt)
 end)
 Net.event("MatchStarted").OnServerEvent:Connect(function(player, cfg)
 	if not throttled(player, "start", 1) then

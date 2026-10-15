@@ -1,7 +1,10 @@
 --!nonstrict
 --[[
-	Hud — 画面上の表示 (スコア・時間・ポップアップ・ミニマップ・溜めゲージ・タイトル/結果)。
-	文字列は Locale のキーで受け、ここで言語に解決する。
+	Hud — 試合中の表示 (スコア・時間・ポップアップ・ミニマップ・パワーゲージ・スタミナ・操作ガイド)。
+	ローカルの Match とオンラインの RemoteMatch の両方を同じように表示する。
+
+	view: { seatId, myTeam, device = "keyboard" | "gamepad" | "touch" }
+	操作ガイドは、状況 (攻撃 / 守備 / セットプレー) と入力機器に合わせて中身が変わる。
 ]]
 
 local Players = game:GetService("Players")
@@ -12,14 +15,46 @@ local Config = require(Shared:WaitForChild("Config"))
 local Locale = require(Shared:WaitForChild("Locale"))
 
 local PL, PW = Config.Pitch.Length, Config.Pitch.Width
-local MATCH_TIME = Config.MatchTime
-local KEYS = Config.Keys
 
-local TAG_COLOR = {
-	good = Color3.fromRGB(90, 255, 120),
-	bad = Color3.fromRGB(255, 100, 100),
-	skill = Color3.fromRGB(0, 230, 255),
-	info = Color3.fromRGB(255, 255, 255),
+local GOOD = Color3.fromRGB(90, 255, 120)
+local BAD = Color3.fromRGB(255, 100, 100)
+local INFO = Color3.fromRGB(255, 255, 255)
+
+-- 操作ガイド: { キーボードの表記, ゲームパッドの表記, 説明のキー }
+local GUIDE = {
+	attack = {
+		{ "Mouse", "LS", "guide.aim" },
+		{ "K / L-Click", "A", "guide.pass" },
+		{ "I", "Y", "guide.through" },
+		{ "L", "B", "guide.lofted" },
+		{ "J / R-Click", "X", "guide.shoot" },
+		{ "Shift", "RT", "guide.dash" },
+		{ "Q + K/I/J", "LB + A/Y/X", "guide.l1" },
+		{ "E + J / E + K", "RB + X / RB + A", "guide.r1" },
+		{ "← ↑ → ↓", "RS", "guide.feint" },
+	},
+	defense = {
+		{ "K", "A", "guide.pressure" },
+		{ "F", "LT", "guide.matchup" },
+		{ "E", "RB", "guide.callpress" },
+		{ "J", "X", "guide.charge" },
+		{ "L", "B", "guide.slide" },
+		{ "Q", "LB", "guide.switch" },
+		{ "← ↑ → ↓", "RS", "guide.switchdir" },
+		{ "I", "Y", "guide.gk" },
+		{ "Z / C", "D-Pad ↓↑", "guide.level" },
+	},
+	setpiece = {
+		{ "Mouse / WASD", "LS", "guide.sp.aim" },
+		{ "K", "A", "guide.sp.pass" },
+		{ "L", "B", "guide.sp.lofted" },
+		{ "I", "Y", "guide.sp.through" },
+		{ "J", "X", "guide.sp.shoot" },
+		{ "← →", "RS", "guide.sp.curl" },
+	},
+	keeper = {
+		{ "WASD", "LS", "guide.pk.dive" },
+	},
 }
 
 local function new(class, props, parent)
@@ -74,27 +109,69 @@ function Hud.new(lang)
 	self.scoreBar = panel(self.gui, {
 		AnchorPoint = Vector2.new(0.5, 0),
 		Position = UDim2.new(0.5, 0, 0, 8),
-		Size = UDim2.fromOffset(420, 44),
+		Size = UDim2.fromOffset(460, 44),
 	})
 	self.scoreText = text(self.scoreBar, { Size = UDim2.new(1, -16, 1, -8), Position = UDim2.fromOffset(8, 4) })
-
-	-- 前後半の表示 / PK 戦の経過 / リプレイ
 	self.periodText = text(self.gui, {
 		AnchorPoint = Vector2.new(0.5, 0),
 		Position = UDim2.new(0.5, 0, 0, 54),
-		Size = UDim2.fromOffset(300, 20),
+		Size = UDim2.fromOffset(360, 20),
 		TextSize = 14,
 		TextScaled = false,
 		TextColor3 = Color3.fromRGB(200, 230, 210),
 	})
+	self.setpText = text(self.gui, {
+		AnchorPoint = Vector2.new(0.5, 0),
+		Position = UDim2.new(0.5, 0, 0, 76),
+		Size = UDim2.fromOffset(760, 28),
+		TextColor3 = Color3.fromRGB(255, 255, 160),
+		Visible = false,
+	})
 	self.replayText = text(self.gui, {
-		AnchorPoint = Vector2.new(0, 0),
 		Position = UDim2.fromOffset(16, 64),
-		Size = UDim2.fromOffset(300, 34),
+		Size = UDim2.fromOffset(320, 34),
 		TextColor3 = Color3.fromRGB(255, 120, 120),
 		TextXAlignment = Enum.TextXAlignment.Left,
 		Visible = false,
 	})
+	self.popupLabels = {}
+	for i = 1, 2 do
+		self.popupLabels[i] = text(self.gui, {
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			Position = UDim2.new(0.5, 0, 0.25 + 0.11 * (i - 1), 0),
+			Size = UDim2.fromOffset(560, 56),
+			TextStrokeTransparency = 0,
+			Visible = false,
+		})
+	end
+	self.pauseText = text(self.gui, {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.5),
+		Size = UDim2.fromOffset(640, 60),
+		Text = Locale.t(lang, "hud.paused"),
+		Visible = false,
+	})
+
+	-- パワーゲージ (溜めている間)
+	self.gauge = panel(self.gui, {
+		AnchorPoint = Vector2.new(0.5, 1),
+		Position = UDim2.new(0.5, 0, 1, -70),
+		Size = UDim2.fromOffset(300, 26),
+		Visible = false,
+	})
+	self.gaugeFill = new("Frame", {
+		BackgroundColor3 = Color3.fromRGB(0, 200, 255),
+		BorderSizePixel = 0,
+		Size = UDim2.fromScale(0, 1),
+	}, self.gauge)
+	new("UICorner", { CornerRadius = UDim.new(0, 10) }, self.gaugeFill)
+	self.gaugeText = text(self.gauge, {
+		Size = UDim2.fromScale(1, 1),
+		TextScaled = false,
+		TextSize = 15,
+		ZIndex = 2,
+	})
+
 	-- スタミナ
 	self.staminaBar = panel(self.gui, {
 		AnchorPoint = Vector2.new(0.5, 1),
@@ -108,57 +185,13 @@ function Hud.new(lang)
 	}, self.staminaBar)
 	new("UICorner", { CornerRadius = UDim.new(0, 6) }, self.staminaFill)
 
-	-- セットプレーの案内
-	self.setpText = text(self.gui, {
-		AnchorPoint = Vector2.new(0.5, 0),
-		Position = UDim2.new(0.5, 0, 0, 62),
-		Size = UDim2.fromOffset(760, 30),
-		TextColor3 = Color3.fromRGB(255, 255, 160),
-		Visible = false,
-	})
-
-	-- 中央のポップアップ (直近 2 つ)
-	self.popupLabels = {}
-	for i = 1, 2 do
-		self.popupLabels[i] = text(self.gui, {
-			AnchorPoint = Vector2.new(0.5, 0.5),
-			Position = UDim2.new(0.5, 0, 0.25 + 0.11 * (i - 1), 0),
-			Size = UDim2.fromOffset(560, 56),
-			TextStrokeTransparency = 0,
-			Visible = false,
-		})
-	end
-
-	-- 一時停止
-	self.pauseText = text(self.gui, {
-		AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.fromScale(0.5, 0.5),
-		Size = UDim2.fromOffset(640, 60),
-		Text = Locale.t(lang, "hud.paused"),
-		Visible = false,
-	})
-
-	-- 溜めゲージ
-	self.chargeBar = panel(self.gui, {
-		AnchorPoint = Vector2.new(0.5, 1),
-		Position = UDim2.new(0.5, 0, 1, -64),
-		Size = UDim2.fromOffset(220, 16),
-		Visible = false,
-	})
-	self.chargeFill = new("Frame", {
-		BackgroundColor3 = Color3.fromRGB(0, 200, 255),
-		BorderSizePixel = 0,
-		Size = UDim2.fromScale(0, 1),
-	}, self.chargeBar)
-	new("UICorner", { CornerRadius = UDim.new(0, 10) }, self.chargeFill)
-
 	-- ミニマップ
 	local mw = 190
 	local mh = math.floor(mw * PW / PL)
 	self.mapW, self.mapH = mw, mh
 	self.minimap = new("Frame", {
-		AnchorPoint = Vector2.new(1, 1),
-		Position = UDim2.new(1, -16, 1, -16),
+		AnchorPoint = Vector2.new(1, 0),
+		Position = UDim2.new(1, -16, 0, 60),
 		Size = UDim2.fromOffset(mw, mh),
 		BackgroundColor3 = Color3.fromRGB(20, 60, 20),
 		BackgroundTransparency = 0.2,
@@ -178,6 +211,7 @@ function Hud.new(lang)
 			Size = UDim2.fromOffset(6, 6),
 			BorderSizePixel = 0,
 		}, self.minimap)
+		new("UICorner", { CornerRadius = UDim.new(1, 0) }, self.dots[i])
 	end
 	self.ballDot = new("Frame", {
 		AnchorPoint = Vector2.new(0.5, 0.5),
@@ -187,184 +221,148 @@ function Hud.new(lang)
 		ZIndex = 3,
 	}, self.minimap)
 
-	-- 操作説明 (H で隠す)
-	self.help = panel(self.gui, {
+	-- 操作ガイド (状況と入力機器で中身が変わる)
+	self.guide = panel(self.gui, {
 		AnchorPoint = Vector2.new(0, 1),
 		Position = UDim2.new(0, 12, 1, -12),
-		Size = UDim2.fromOffset(520, 108),
+		Size = UDim2.fromOffset(360, 40),
+		AutomaticSize = Enum.AutomaticSize.Y,
 	})
-	local lines = {
-		Locale.t(lang, "hud.help.title"),
-		Locale.t(lang, "hud.help.attack"),
-		Locale.t(lang, "hud.help.flick"),
-		Locale.t(lang, "hud.help.defend"),
-		Locale.t(lang, "hud.help.other"),
-	}
-	self.helpText = text(self.help, {
-		Position = UDim2.fromOffset(8, 4),
-		Size = UDim2.new(1, -16, 1, -8),
-		Text = table.concat(lines, "\n"),
-		TextSize = 13,
-		TextScaled = false,
-		TextWrapped = true,
-		TextXAlignment = Enum.TextXAlignment.Left,
-		TextYAlignment = Enum.TextYAlignment.Top,
-		TextStrokeTransparency = 1,
-	})
-
-	-- タイトル / 結果のオーバーレイ
-	self.overlay = new("Frame", {
-		BackgroundColor3 = Color3.fromRGB(10, 25, 12),
-		BackgroundTransparency = 0.15,
-		BorderSizePixel = 0,
-		Size = UDim2.fromScale(1, 1),
-		Visible = false,
-		ZIndex = 20,
-	}, self.gui)
-	self.overlayTitle = text(self.overlay, {
-		AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.fromScale(0.5, 0.28),
-		Size = UDim2.fromOffset(720, 90),
-		ZIndex = 21,
-	})
-	self.overlayBody = text(self.overlay, {
-		AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.fromScale(0.5, 0.45),
-		Size = UDim2.fromOffset(780, 70),
-		TextWrapped = true,
-		ZIndex = 21,
-	})
-	self.overlayButton = new("TextButton", {
-		AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.fromScale(0.5, 0.65),
-		Size = UDim2.fromOffset(280, 64),
-		BackgroundColor3 = Color3.fromRGB(40, 170, 80),
-		Font = Enum.Font.GothamBold,
-		TextSize = 28,
-		TextColor3 = Color3.new(1, 1, 1),
-		AutoButtonColor = true,
-		ZIndex = 22,
-	}, self.overlay)
-	new("UICorner", { CornerRadius = UDim.new(0, 14) }, self.overlayButton)
-	self._buttonConn = nil
+	new("UIListLayout", { Padding = UDim.new(0, 3), SortOrder = Enum.SortOrder.LayoutOrder }, self.guide)
+	new("UIPadding", {
+		PaddingTop = UDim.new(0, 6),
+		PaddingBottom = UDim.new(0, 6),
+		PaddingLeft = UDim.new(0, 8),
+		PaddingRight = UDim.new(0, 8),
+	}, self.guide)
+	self.guideKey = nil
+	self.helpVisible = true
 	return self
 end
 
-function Hud:_showOverlay(title, body, buttonKey, onClick)
-	self.overlayTitle.Text = title
-	self.overlayBody.Text = body
-	self.overlayButton.Text = Locale.t(self.lang, buttonKey)
-	self.overlay.Visible = true
-	if self._buttonConn then
-		self._buttonConn:Disconnect()
-	end
-	self._buttonConn = self.overlayButton.Activated:Connect(function()
-		self.overlay.Visible = false
-		onClick()
-	end)
-end
-
-function Hud:showTitle(onStart)
-	self:_showOverlay(Locale.t(self.lang, "title"), Locale.t(self.lang, "subtitle"), "start", onStart)
-end
-
-function Hud:showResult(result, onRematch)
-	local verdict = "result.draw"
-	if result.home > result.away then
-		verdict = "result.win"
-	elseif result.home < result.away then
-		verdict = "result.lose"
-	end
-	local body = string.format(
-		"%d - %d   %s\n%s",
-		result.home,
-		result.away,
-		Locale.t(self.lang, verdict),
-		Locale.t(
-			self.lang,
-			"result.stats",
-			result.passes,
-			result.intercepted,
-			result.skillBeat,
-			result.skillTried,
-			result.offside,
-			result.fouls
-		)
-	)
-	self:_showOverlay(Locale.t(self.lang, "result"), body, "rematch", onRematch)
-end
-
 function Hud:toggleHelp()
-	self.help.Visible = not self.help.Visible
+	self.helpVisible = not self.helpVisible
+	self.guide.Visible = self.helpVisible
 end
 
---- 試合の表示を更新する (毎フレーム)。
-function Hud:step(match)
-	local t = Locale.t
-	local remain = math.max(0, MATCH_TIME - match.elapsed)
-	local mm, ss = math.floor(remain / 60), math.floor(remain % 60)
-	self.scoreText.Text = string.format("%s    %d:%02d", t(self.lang, "hud.score", match.score[0], match.score[1]), mm, ss)
+--- 操作ガイドを作り直す (状況・機器が変わった時だけ)。
+function Hud:_renderGuide(context, device)
+	local key = context .. ":" .. device
+	if self.guideKey == key then
+		return
+	end
+	self.guideKey = key
+	for _, c in self.guide:GetChildren() do
+		if not c:IsA("UIComponent") then
+			c:Destroy()
+		end
+	end
+	local title = text(self.guide, {
+		Size = UDim2.new(1, 0, 0, 18),
+		TextScaled = false,
+		TextSize = 14,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextColor3 = Color3.fromRGB(255, 230, 120),
+		Text = Locale.t(self.lang, "guide.title." .. context) .. "   " .. Locale.t(self.lang, "guide.hide"),
+		LayoutOrder = 0,
+	})
+	title.TextStrokeTransparency = 1
+	if device == "touch" then
+		text(self.guide, {
+			Size = UDim2.new(1, 0, 0, 34),
+			TextScaled = false,
+			TextSize = 13,
+			TextWrapped = true,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			Text = Locale.t(self.lang, "guide.touch"),
+			TextStrokeTransparency = 1,
+			LayoutOrder = 1,
+		})
+		return
+	end
+	for i, row in GUIDE[context] do
+		local glyph = device == "gamepad" and row[2] or row[1]
+		local r = new("Frame", { BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 20), LayoutOrder = i }, self.guide)
+		local g = new("Frame", {
+			BackgroundColor3 = Color3.fromRGB(235, 235, 235),
+			BorderSizePixel = 0,
+			Size = UDim2.fromOffset(112, 18),
+		}, r)
+		new("UICorner", { CornerRadius = UDim.new(0, 5) }, g)
+		local gl = text(g, {
+			Size = UDim2.fromScale(1, 1),
+			TextScaled = false,
+			TextSize = 12,
+			TextColor3 = Color3.fromRGB(20, 20, 20),
+			Text = glyph,
+		})
+		gl.TextStrokeTransparency = 1
+		local d = text(r, {
+			Position = UDim2.fromOffset(120, 0),
+			Size = UDim2.new(1, -120, 1, 0),
+			TextScaled = false,
+			TextSize = 13,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			Text = Locale.t(self.lang, row[3]),
+		})
+		d.TextStrokeTransparency = 1
+	end
+end
 
-	-- セットプレーの案内
+--- 自分の状況: "attack" | "defense" | "setpiece" | "keeper"
+function Hud.context(match, s, myTeam)
+	local b = match.ball
+	local ctrl = s and s.ctrl
 	local sp = match.setp
 	if sp ~= nil then
-		local msg = t(self.lang, "setp." .. sp.kind)
-		if sp.team == 0 and match:human(0) then
-			msg ..= "  (" .. t(self.lang, "setp.hint")
-			if sp.kind == "fk" or sp.kind == "pk" then
-				msg ..= t(self.lang, "setp.hint.shoot")
-			end
-			msg ..= ")"
+		if ctrl ~= nil and sp.taker == ctrl then
+			return "setpiece"
 		end
-		self.setpText.Text = msg
-		self.setpText.Visible = true
-	else
-		self.setpText.Visible = false
-	end
-
-	-- ポップアップ (新しい順に最大 2 つ)
-	local shown = 0
-	for i = #match.popups, 1, -1 do
-		if shown >= 2 then
-			break
+		if sp.kind == "pk" and sp.team ~= myTeam then
+			return "keeper"
 		end
-		local p = match.popups[i]
-		shown += 1
-		local lbl = self.popupLabels[shown]
-		local age = match.elapsed - p.t
-		lbl.Text = t(self.lang, p.key)
-		lbl.TextColor3 = TAG_COLOR[p.tag] or TAG_COLOR.info
-		lbl.TextTransparency = math.clamp((age - 0.9) / 0.4, 0, 1)
-		lbl.Visible = true
 	end
-	for i = shown + 1, 2 do
-		self.popupLabels[i].Visible = false
+	if b.owner ~= nil and b.owner.team == myTeam then
+		return "attack"
 	end
+	if b.owner == nil and ctrl ~= nil then
+		local dx, dy = b.p.x - ctrl.p.x, b.p.y - ctrl.p.y
+		if dx * dx + dy * dy < 36 then
+			return "attack"
+		end
+	end
+	return "defense"
+end
 
-	self.pauseText.Visible = match.paused
+function Hud:teamName(match, team, myTeam)
+	if team == myTeam then
+		return Locale.t(self.lang, "hud.team.you")
+	elseif match:human(team) then
+		return Locale.t(self.lang, "hud.team.rival")
+	end
+	return Locale.t(self.lang, "hud.team.cpu")
+end
 
-	-- シュートの溜め
-	if match.charge ~= nil then
-		local pw = math.min(1, (match.elapsed - match.charge) / 1.0)
-		self.chargeBar.Visible = true
-		self.chargeFill.Size = UDim2.fromScale(pw, 1)
-		self.chargeFill.BackgroundColor3 = pw < 0.85 and Color3.fromRGB(0, 200, 255) or Color3.fromRGB(255, 80, 80)
-	else
-		self.chargeBar.Visible = false
+--- 毎フレーム。view: { seatId, myTeam, device }
+function Hud:step(match, view)
+	local t = Locale.t
+	local myTeam = view.myTeam or 0
+	local s = match:seat(view.seatId)
+	local length = match.matchTime or Config.MatchTime
+	local remain = math.max(0, length - match.elapsed)
+	if match.period == "extra" then
+		remain = math.max(0, (match.boundaries and match.boundaries[match.bIndex] or length) - match.elapsed)
 	end
-
-	-- ミニマップ
-	local function mp(p)
-		return UDim2.fromOffset((p.x / PL + 0.5) * self.mapW, (p.y / PW + 0.5) * self.mapH)
-	end
-	for i, p in match.pl do
-		local d = self.dots[i]
-		d.Visible = not p.out
-		d.Position = mp(p.p)
-		d.BackgroundColor3 = p.team == 0 and Color3.fromRGB(35, 110, 215) or Color3.fromRGB(205, 45, 45)
-		d.Size = p == match.ctrl and UDim2.fromOffset(9, 9) or UDim2.fromOffset(6, 6)
-	end
-	self.ballDot.Position = mp(match.ball.p)
+	local mm, ss = math.floor(remain / 60), math.floor(remain % 60)
+	self.scoreText.Text = string.format(
+		"%s  %d - %d  %s    %d:%02d",
+		self:teamName(match, 0, myTeam),
+		match.score[0],
+		match.score[1],
+		self:teamName(match, 1, myTeam),
+		mm,
+		ss
+	)
 
 	-- 前後半・延長・PK 戦
 	local periodKey
@@ -379,19 +377,98 @@ function Hud:step(match)
 	if match.shoot ~= nil then
 		ptext ..= "   " .. t(self.lang, "hud.pk", match.shoot.goals[0], match.shoot.goals[1])
 	end
+	local lv = match.level and match.level[myTeam] or 0
+	if lv ~= 0 then
+		ptext ..= "   " .. t(self.lang, "hud.level", (lv > 0 and "+" or "") .. tostring(lv))
+	end
 	self.periodText.Text = ptext
 	self.replayText.Visible = match.mode == "replay"
 	if match.mode == "replay" then
 		self.replayText.Text = "▶ " .. t(self.lang, "hud.replay")
 	end
 
-	-- スタミナ (操作中の選手)
-	local c = match.ctrl
+	-- セットプレー
+	local sp = match.setp
+	if sp ~= nil then
+		local msg = t(self.lang, "setp." .. sp.kind)
+		if s ~= nil and sp.taker == s.ctrl then
+			msg ..= "  " .. t(self.lang, sp.kind == "pk" and "setp.hint.pk" or "setp.hint")
+		elseif sp.kind == "pk" and sp.team ~= myTeam then
+			msg ..= "  " .. t(self.lang, "setp.hint.keeper")
+		end
+		self.setpText.Text = msg
+		self.setpText.Visible = true
+	else
+		self.setpText.Visible = false
+	end
+
+	-- ポップアップ (得をしたチームが自分なら緑、相手なら赤)
+	local shown = 0
+	for i = #match.popups, 1, -1 do
+		if shown >= 2 then
+			break
+		end
+		local p = match.popups[i]
+		shown += 1
+		local lbl = self.popupLabels[shown]
+		local age = match.elapsed - p.t
+		lbl.Text = t(self.lang, p.key)
+		lbl.TextColor3 = p.team == nil and INFO or (p.team == myTeam and GOOD or BAD)
+		lbl.TextTransparency = math.clamp((age - 0.9) / 0.4, 0, 1)
+		lbl.Visible = true
+	end
+	for i = shown + 1, 2 do
+		self.popupLabels[i].Visible = false
+	end
+	self.pauseText.Visible = match.paused == true
+
+	-- パワーゲージ
+	local pw = s and match:chargePower(s)
+	if pw ~= nil then
+		self.gauge.Visible = true
+		self.gaugeFill.Size = UDim2.fromScale(pw, 1)
+		self.gaugeFill.BackgroundColor3 = pw < 0.4 and Color3.fromRGB(0, 200, 255)
+			or (pw < 0.8 and Color3.fromRGB(255, 200, 60) or Color3.fromRGB(255, 80, 80))
+		local kind = (s.charge and s.charge.btn) or s.kind or "pass"
+		self.gaugeText.Text = t(self.lang, "gauge." .. kind) .. "  " .. math.floor(pw * 100) .. "%"
+	else
+		self.gauge.Visible = false
+	end
+
+	-- スタミナ
+	local c = s and s.ctrl
 	if c ~= nil then
 		local f = math.clamp(c.stamina / Config.Stamina.Max, 0, 1)
 		self.staminaFill.Size = UDim2.fromScale(f, 1)
 		self.staminaFill.BackgroundColor3 = c.exhausted and Color3.fromRGB(255, 90, 90)
 			or (f < 0.35 and Color3.fromRGB(255, 190, 60) or Color3.fromRGB(120, 230, 120))
+	end
+
+	-- ミニマップ (操作中の選手は大きく)
+	local controlled = {}
+	for _, x in match.seats do
+		if x.ctrl ~= nil then
+			controlled[x.ctrl] = x.id == view.seatId and "me" or "other"
+		end
+	end
+	local function mp(p)
+		return UDim2.fromOffset((p.x / PL + 0.5) * self.mapW, (p.y / PW + 0.5) * self.mapH)
+	end
+	for i, p in match.pl do
+		local d = self.dots[i]
+		d.Visible = not p.out
+		d.Position = mp(p.p)
+		d.BackgroundColor3 = p.team == 0 and Color3.fromRGB(35, 110, 215) or Color3.fromRGB(205, 45, 45)
+		local who = controlled[p]
+		d.Size = who == "me" and UDim2.fromOffset(10, 10) or (who == "other" and UDim2.fromOffset(8, 8) or UDim2.fromOffset(6, 6))
+	end
+	self.ballDot.Position = mp(match.ball.p)
+
+	-- 操作ガイド
+	local ctx = Hud.context(match, s, myTeam)
+	self.context = ctx
+	if self.helpVisible then
+		self:_renderGuide(ctx, view.device or "keyboard")
 	end
 end
 
@@ -399,5 +476,4 @@ function Hud:destroy()
 	self.gui:Destroy()
 end
 
-Hud.KEYS = KEYS
 return Hud

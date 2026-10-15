@@ -162,6 +162,29 @@ Config.Header = { MinZ = 0.9, MaxZ = 2.6, Reach = 1.7, ShotRange = 20, CpuChance
 -- ゴールリプレイ。直前の秒数と再生速度
 Config.Replay = { Seconds = 6, Speed = 0.8, Step = 0.05 }
 
+-- 操作 (eFootball に合わせた入力の扱い)
+Config.Controls = {
+	DeadZone = 0.15, -- これ未満のスティック入力は無視
+	AutopilotDelay = 0.6, -- 操作中の選手に入力が無い時、この秒数で AI が補助を始める
+	GaugeTime = 1.0, -- パワーゲージが満タンになるまで [s]
+	DefaultAssist = 1, -- パスの補助 0: マニュアル / 1: 標準 / 2: フル
+	AssistCone = { 0, 35, 60 }, -- 補助ごとの、受け手を探す角度 [度]
+	AssistPowerWeight = { 1, 0.5, 0 }, -- 補助ごとの、パワーゲージが距離に効く割合
+	PenaltyPower = 0.8, -- PK のパワー (固定)
+	SetpieceAutoTake = 8, -- 人間のセットプレーを放置した時、代わりに蹴るまで [s]
+}
+
+-- オンライン (協力 / 対戦)。試合はサーバーで動かす
+Config.Online = {
+	TickRate = 30, -- サーバーの試合の更新 [回/秒]
+	SnapshotRate = 15, -- クライアントへの送信 [回/秒]
+	InputRate = 20, -- クライアントからの入力の送信 [回/秒] (ボタンの変化は即時)
+	InterpDelay = 0.1, -- クライアントの補間の遅れ [s]
+	MaxPerTeam = 3, -- 1 チームの人数 (eFootball の協力と同じ 3 人まで)
+	MaxRooms = 20,
+	MaxInputsPerSecond = 80,
+}
+
 -- キー割り当て (スマホ版バーチャルパッドのボタン構成をキーボードに写したもの)
 Config.Keys = {
 	pass = "K",

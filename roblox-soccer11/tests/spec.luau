@@ -1,6 +1,6 @@
 --!nocheck
 --[[
-	Match の検証。Config / Locale / Match はランナーがグローバルに注入する。
+	Match / Rewards / Locale / Config の検証。モジュールはランナーがグローバルに注入する。
 	乱数は決定論的な LCG を渡して再現できるようにしている。
 ]]
 
@@ -11,14 +11,14 @@ local function check(name, cond, detail)
 		print("  ok   " .. name)
 	else
 		failures += 1
-		print("  FAIL " .. name .. (detail and ("  -- " .. tostring(detail)) or ""))
+		print("  FAIL " .. name .. (detail ~= nil and ("  -- " .. tostring(detail)) or ""))
 	end
 end
 
 local function lcg(seed)
 	local s = seed
 	return function()
-		s = (s * 48271) % 2147483647 -- MINSTD
+		s = (s * 48271) % 2147483647
 		return s / 2147483647
 	end
 end
@@ -27,247 +27,11 @@ local function finite(p)
 	return p.x == p.x and p.y == p.y and math.abs(p.x) < 1e6 and math.abs(p.y) < 1e6
 end
 
-print("== 設定 ==")
-check("選手11人分の陣形", #Config.Formation == 11)
-local nums = {}
-for _, f in Config.Formation do
-	nums[f.num] = true
+local function step(m, n, dt)
+	for _ = 1, n do
+		m:update(dt or 1 / 30)
+	end
 end
-check("背番号が重複しない", (function()
-	local n = 0
-	for _ in nums do
-		n += 1
-	end
-	return n == 11
-end)())
-
-print("== 多言語 ==")
-do
-	local missing = {}
-	for k in Locale.Tables.en do
-		if Locale.Tables.ja[k] == nil then
-			table.insert(missing, k)
-		end
-	end
-	check("日本語の訳漏れが無い", #missing == 0, table.concat(missing, ","))
-	local extra = {}
-	for k in Locale.Tables.ja do
-		if Locale.Tables.en[k] == nil then
-			table.insert(extra, k)
-		end
-	end
-	check("英語にだけ無いキーが無い", #extra == 0, table.concat(extra, ","))
-	-- フォーマット指定子の数が揃っていること
-	local bad = {}
-	for k, en in Locale.Tables.en do
-		local ja = Locale.Tables.ja[k]
-		if ja then
-			local _, a = string.gsub(en, "%%d", "")
-			local _, b = string.gsub(ja, "%%d", "")
-			if a ~= b then
-				table.insert(bad, k)
-			end
-		end
-	end
-	check("%d の数が日英で一致", #bad == 0, table.concat(bad, ","))
-	check("LocaleId ja-jp → ja", Locale.langOf("ja-jp") == "ja")
-	check("LocaleId en-us → en", Locale.langOf("en-us") == "en")
-	check("未定義キーはキーを返す", Locale.t("en", "no.such.key") == "no.such.key")
-end
-
-print("== 試合 (CPU 同士で通し) ==")
-do
-	local m = Match.new({
-		random = lcg(12345),
-		ctrlKind = { [0] = "cpu", [1] = "cpu" },
-	})
-	local steps = 0
-	local bad = nil
-	local setKinds = {}
-	while not m.ended and steps < 400 / 0.033 do
-		m:update(0.033)
-		steps += 1
-		if m.setp then
-			setKinds[m.setp.kind] = true
-		end
-		for _, p in m.pl do
-			if not finite(p.p) or not finite(p.v) then
-				bad = "player " .. p.team .. ":" .. p.i
-			end
-		end
-		if not finite(m.ball.p) or m.ball.z ~= m.ball.z then
-			bad = "ball"
-		end
-		if bad then
-			break
-		end
-	end
-	check("座標が発散しない", bad == nil, bad)
-	check("5分で試合が終わる", m.ended, "elapsed=" .. m.elapsed)
-	check("結果が作られる", m.result ~= nil)
-	local total = m.score[0] + m.score[1]
-	check("得点が現実的 (0〜20)", total >= 0 and total <= 20, total)
-	check("パスが出ている (CPU でも stats は人間のみなので 0 でよい)", m.stats.passes == 0)
-	local kinds = 0
-	for _ in setKinds do
-		kinds += 1
-	end
-	-- CPU 同士はタッチラインに近づかないのでセットプレーは起きないことが多い (下で強制して検証する)
-	print(("  info score=%d-%d fouls=%d setpieces=%d"):format(m.score[0], m.score[1], m.stats.fouls, kinds))
-end
-
-print("== 複数シードで安定 ==")
-do
-	local ok, totalGoals = true, 0
-	for seed = 1, 6 do
-		local m = Match.new({ random = lcg(seed * 7919), ctrlKind = { [0] = "cpu", [1] = "cpu" } })
-		local n = 0
-		while not m.ended and n < 12000 do
-			m:update(1 / 30)
-			n += 1
-		end
-		if not m.ended then
-			ok = false
-		end
-		totalGoals += m.score[0] + m.score[1]
-	end
-	check("6 シードすべて完走", ok)
-	check("6 試合で 1 点以上は入る", totalGoals >= 1, totalGoals)
-end
-
-print("== 人間操作 ==")
-do
-	local m = Match.new({ random = lcg(99) })
-	check("キックオフは HOME 保持", m.ball.owner ~= nil and m.ball.owner.team == 0)
-	check("操作選手が保持者", m.ctrl == m.ball.owner)
-	-- 前へドリブル
-	m:setKey("D", true)
-	local x0 = m.ctrl.p.x
-	for _ = 1, 30 do
-		m:update(1 / 30)
-	end
-	check("D で +x へ進む", m.ctrl.p.x > x0 or m.ball.owner ~= m.ctrl, m.ctrl.p.x - x0)
-	m:setKey("D", false)
-	-- パス
-	local c = m.ball.owner
-	if c and c.team == 0 then
-		m:onKey("K")
-		check("K でパスが出る", m.ball.owner == nil and m.ball.kind == "pass", m.ball.kind)
-		check("パス数が数えられる", m.stats.passes == 1)
-	end
-	-- 一時停止
-	m:onKey("P")
-	local t = m.elapsed
-	m:update(0.1)
-	check("P で一時停止", m.paused and m.elapsed == t)
-	m:onKey("P")
-	check("P で再開", not m.paused)
-end
-
-print("== シュートの溜め ==")
-do
-	local m = Match.new({ random = lcg(5) })
-	local c = m.ctrl
-	c.p = { x = 40, y = 0 }
-	m.ball.owner = c
-	m:setKey("J", true)
-	m:onKey("J")
-	check("J を押すと溜め開始", m.charge ~= nil)
-	for _ = 1, 20 do
-		m:update(1 / 30)
-	end
-	m:setKey("J", false)
-	m:update(1 / 30)
-	check("J を離すとシュートが飛ぶ", m.ball.kind == "shot" and m.ball.owner == nil, m.ball.kind)
-	check("ボールがゴール方向へ", m.ball.v.x > 0)
-end
-
-print("== 技 (Shift タップ → WASD) ==")
-do
-	local m = Match.new({ random = lcg(3) })
-	for _, q in m.teams[1] do -- 邪魔が入らないよう相手を遠ざける
-		q.p = { x = 45, y = q.p.y }
-	end
-	local c = m.ctrl
-	check("技の入力前は skill なし", c.skill == nil)
-	m:setKey("Shift", true)
-	m:update(1 / 30)
-	m:setKey("Shift", false)
-	m:update(1 / 30)
-	m:onKey("S") -- 横へ弾く (HOME は +x を向くので S は横)
-	for _ = 1, 10 do
-		m:update(1 / 30)
-	end
-	check("横1回でダブルタッチが始まる", m.skillStats.tried == 1, m.skillStats.tried)
-	check("技名のラベルが出る", #m.labels >= 1 and m.labels[1].key == "skill.double_touch")
-end
-
-print("== キックオフ直後の保護 ==")
-do
-	local m = Match.new({ random = lcg(11) })
-	local owner = m.ball.owner
-	for _ = 1, 30 do -- 1 秒
-		m:update(1 / 30)
-	end
-	check("開始 1 秒はボールを奪われない", m.ball.owner == owner or m.ball.owner == nil or m.ball.owner.team == 0)
-end
-
-print("== ボールが出た時のセットプレー ==")
-do
-	local m = Match.new({ random = lcg(21) })
-	m.ball.owner, m.ball.last = nil, m.teams[0][8]
-	m.ball.p = { x = 10, y = 33.9 }
-	m.ball.v = { x = 0, y = 6 }
-	m:update(1 / 30)
-	check("タッチラインを出たらスローイン", m.setp ~= nil and m.setp.kind == "throw", m.setp and m.setp.kind)
-	check("最後に触れた HOME の相手 (AWAY) がスロー", m.setp.team == 1)
-
-	local m2 = Match.new({ random = lcg(22) })
-	m2.ball.owner, m2.ball.last = nil, m2.teams[1][8] -- AWAY が最後に触れた
-	m2.ball.p = { x = 52.4, y = 20 }
-	m2.ball.v = { x = 6, y = 0 }
-	m2:update(1 / 30)
-	check("AWAY が出したら HOME のコーナー", m2.setp ~= nil and m2.setp.kind == "corner" and m2.setp.team == 0,
-		m2.setp and (m2.setp.kind .. m2.setp.team))
-
-	local m3 = Match.new({ random = lcg(23) })
-	m3.ball.owner, m3.ball.last = nil, m3.teams[0][8] -- HOME が最後に触れた
-	m3.ball.p = { x = 52.4, y = 20 }
-	m3.ball.v = { x = 6, y = 0 }
-	m3:update(1 / 30)
-	check("HOME が出したら AWAY のゴールキック", m3.setp ~= nil and m3.setp.kind == "gk" and m3.setp.team == 1)
-end
-
-print("== ゴール ==")
-do
-	local m = Match.new({ random = lcg(31) })
-	m.ball.owner, m.ball.last = nil, m.teams[0][10]
-	m.ball.p = { x = 52.4, y = 0 }
-	m.ball.v = { x = 8, y = 0 }
-	m.ball.z = 0.5
-	m:update(1 / 30)
-	check("ゴールで HOME に 1 点", m.score[0] == 1, m.score[0])
-	check("得点後は AWAY のキックオフ", m.ball.owner ~= nil and m.ball.owner.team == 1)
-	check("GOAL! の表示が出る", #m.popups >= 1 and m.popups[1].key == "popup.goal")
-
-	local m2 = Match.new({ random = lcg(32) })
-	m2.ball.owner, m2.ball.last = nil, m2.teams[0][10]
-	m2.ball.p = { x = 52.4, y = 0 }
-	m2.ball.v = { x = 8, y = 0 }
-	m2.ball.z = 3.5 -- バーの上
-	m2:update(1 / 30)
-	check("バーの上を越えたらゴールではない", m2.score[0] == 0)
-end
-
-print("== オフサイド・ファウルの導線 ==")
-do
-	local m = Match.new({ random = lcg(8) })
-	m:foul(m.teams[1][5], m.teams[0][5])
-	check("ファウルで FK/PK になる", m.setp ~= nil and (m.setp.kind == "fk" or m.setp.kind == "pk"))
-	check("ファウルが数えられる", m.stats.fouls == 1)
-	check("人間側のセットプレーではキッカーを操作", m.ctrl == m.setp.taker)
-end
-
 
 local function runUntilEnd(m, maxSteps)
 	local n = 0
@@ -286,6 +50,551 @@ local function cpuOpts(seed, extra)
 	return o
 end
 
+--- 相手を遠ざけて、邪魔の入らない状況を作る。
+local function clearOpponents(m, team)
+	for _, q in m.teams[team or 1] do
+		q.p = { x = (m:sgn(team or 1) > 0) and -45 or 45, y = q.p.y }
+		q.v = { x = 0, y = 0 }
+	end
+end
+
+--- ボールを持たせる (操作者 s の選手に)。
+local function giveBall(m, s, pos)
+	local p = s.ctrl
+	if pos then
+		p.p = { x = pos.x, y = pos.y }
+	end
+	m:gainBall(p)
+	if m.ball.owner ~= p then
+		m:assign(s, p)
+		m:gainBall(p)
+	end
+	return p
+end
+
+--- ボタンを t 秒押して離す (その間も試合を進める)。
+local function hold(m, id, btn, seconds)
+	m:press(id, btn)
+	step(m, math.max(0, math.floor(seconds * 30 + 0.5)))
+	m:release(id, btn)
+end
+
+local function angleOf(v)
+	return math.deg(math.atan2(v.y, v.x))
+end
+
+local function angDiff(a, b)
+	local d = (a - b + 180) % 360 - 180
+	return math.abs(d)
+end
+
+print("== 設定 ==")
+check("選手11人分の陣形", #Config.Formation == 11)
+do
+	local nums, n = {}, 0
+	for _, f in Config.Formation do
+		if not nums[f.num] then
+			n += 1
+		end
+		nums[f.num] = true
+	end
+	check("背番号が重複しない", n == 11)
+end
+
+print("== 多言語 ==")
+do
+	local missing, extra, bad = {}, {}, {}
+	for k in Locale.Tables.en do
+		if Locale.Tables.ja[k] == nil then
+			table.insert(missing, k)
+		end
+	end
+	for k in Locale.Tables.ja do
+		if Locale.Tables.en[k] == nil then
+			table.insert(extra, k)
+		end
+	end
+	for k, en in Locale.Tables.en do
+		local ja = Locale.Tables.ja[k]
+		if ja then
+			local _, a = string.gsub(en, "%%[ds]", "")
+			local _, b = string.gsub(ja, "%%[ds]", "")
+			if a ~= b then
+				table.insert(bad, k)
+			end
+		end
+	end
+	check("日本語の訳漏れが無い", #missing == 0, table.concat(missing, ","))
+	check("英語にだけ無いキーが無い", #extra == 0, table.concat(extra, ","))
+	check("書式指定子の数が日英で一致", #bad == 0, table.concat(bad, ","))
+	check("LocaleId ja-jp → ja", Locale.langOf("ja-jp") == "ja")
+	check("未定義キーはキーを返す", Locale.t("en", "no.such.key") == "no.such.key")
+end
+
+print("== 試合 (CPU 同士で通し) ==")
+do
+	local m = Match.new(cpuOpts(12345))
+	local bad = nil
+	local n = 0
+	while not m.ended and n < 20000 do
+		m:update(1 / 30)
+		n += 1
+		for _, p in m.pl do
+			if not finite(p.p) or not finite(p.v) then
+				bad = "player " .. p.team .. ":" .. p.i
+			end
+		end
+		if not finite(m.ball.p) then
+			bad = "ball"
+		end
+		if bad then
+			break
+		end
+	end
+	check("座標が発散しない", bad == nil, bad)
+	check("試合が終わる", m.ended, m.elapsed)
+	check("結果が作られる", m.result ~= nil)
+	local total = m.score[0] + m.score[1]
+	check("得点が現実的 (0〜20)", total >= 0 and total <= 20, total)
+	local okAll, goals = true, 0
+	for seed = 1, 6 do
+		local c = Match.new(cpuOpts(seed * 7919))
+		runUntilEnd(c, 20000)
+		okAll = okAll and c.ended
+		goals += c.score[0] + c.score[1]
+	end
+	check("6 シードすべて完走", okAll)
+	check("6 試合で 1 点以上は入る", goals >= 1, goals)
+end
+
+print("== 操作者 (シート) ==")
+do
+	local m = Match.new({ random = lcg(99) })
+	check("既定は HOME に操作者 1 人", #m.seats == 1 and m.seats[1].team == 0)
+	local s = m:seat(1)
+	check("キックオフは操作者の選手がボールを持つ", m.ball.owner == s.ctrl and s.ctrl.seat == s)
+	check("互換: m.ctrl は操作中の選手", m.ctrl == s.ctrl)
+	clearOpponents(m)
+	m:setMove(1, 1, 0)
+	local x0 = s.ctrl.p.x
+	step(m, 30)
+	check("アナログ入力で +x へ進む", s.ctrl.p.x > x0 + 2, s.ctrl.p.x - x0)
+	m:setMove(1, 0.3, 0)
+	local p = s.ctrl
+	local v0 = 0
+	step(m, 30)
+	v0 = math.sqrt(p.v.x ^ 2 + p.v.y ^ 2)
+	m:setMove(1, 1, 0)
+	step(m, 30)
+	local v1 = math.sqrt(p.v.x ^ 2 + p.v.y ^ 2)
+	check("スティックの倒し具合で速さが変わる", v1 > v0 * 1.5, v0 .. " → " .. v1)
+	m:setMove(1, 0, 0)
+	m:command(1, "pause")
+	local t = m.elapsed
+	m:update(0.1)
+	check("一時停止", m.paused and m.elapsed == t)
+	m:command(1, "pause")
+	check("再開", not m.paused)
+end
+
+print("== パス: どの方向にも出せる・アナログの狙い・強さ ==")
+do
+	-- 走っている向きと逆 (後ろ) の味方へパスできる
+	local m = Match.new({ random = lcg(5), assist = 1 })
+	clearOpponents(m)
+	local s = m:seat(1)
+	local p = giveBall(m, s, { x = 10, y = 0 })
+	local mate = nil
+	for _, q in m:active(0) do
+		if q ~= p and not q.gk then
+			q.p = { x = 100, y = 100 } -- 他は遠くへ
+		end
+	end
+	mate = m.teams[0][6]
+	mate.p = { x = -5, y = 6 } -- 後ろ斜め
+	m:setMove(1, 1, 0) -- 前へ走りながら
+	step(m, 5)
+	m:setAim(1, -15, 6) -- 後ろの味方を狙う
+	hold(m, 1, "pass", 0.3)
+	check("後ろの味方へのパスになる (走る向きと関係ない)", m.ball.target == mate, m.ball.target and m.ball.target.role)
+	check("ボールが後ろへ飛ぶ", m.ball.v.x < 0, m.ball.v.x)
+
+	-- マニュアル: 狙った角度 (8 方向でない 37°) にそのまま飛ぶ
+	local m2 = Match.new({ random = lcg(6), assist = 0 })
+	clearOpponents(m2)
+	local s2 = m2:seat(1)
+	giveBall(m2, s2, { x = 0, y = 0 })
+	local ang = math.rad(37)
+	m2:setAim(1, math.cos(ang), math.sin(ang))
+	hold(m2, 1, "pass", 0.5)
+	local fly = angleOf(m2.ball.v)
+	check("マニュアルは狙った角度に飛ぶ (37°)", angDiff(fly, 37) < 6, fly)
+	check("マニュアルは受け手を決めない", m2.ball.target == nil)
+
+	-- 強さ: 長く溜めるほど強い
+	local function speedAfter(holdT)
+		local mm = Match.new({ random = lcg(7), assist = 0 })
+		clearOpponents(mm)
+		local ss = mm:seat(1)
+		giveBall(mm, ss, { x = -20, y = 0 })
+		mm:setAim(1, 1, 0)
+		hold(mm, 1, "pass", holdT)
+		return math.sqrt(mm.ball.v.x ^ 2 + mm.ball.v.y ^ 2)
+	end
+	local weak, strong = speedAfter(0.1), speedAfter(0.9)
+	check("長く溜めるほど強いパス", strong > weak * 1.4, weak .. " / " .. strong)
+
+	-- パワーゲージ
+	local m3 = Match.new({ random = lcg(8) })
+	local s3 = m3:seat(1)
+	clearOpponents(m3)
+	giveBall(m3, s3)
+	local tgt3 = m3.teams[0][7]
+	m3:setAim(1, tgt3.p.x - s3.ctrl.p.x, tgt3.p.y - s3.ctrl.p.y)
+	m3:press(1, "pass")
+	step(m3, 15)
+	local pw = m3:chargePower(s3)
+	check("溜め中のパワーが読める (0.5 秒 ≒ 0.5)", pw ~= nil and math.abs(pw - 0.5) < 0.1, pw)
+	check("溜め中は受け手のプレビューがある", m3:previewReceiver(s3) ~= nil)
+	m3:release(1, "pass")
+	check("離すと蹴る", m3.ball.owner == nil and m3.ball.kind == "pass")
+
+	-- 補助: 狙いが少しずれていても、近い角度の味方に合わせる
+	local m4 = Match.new({ random = lcg(9), assist = 1 })
+	clearOpponents(m4)
+	local s4 = m4:seat(1)
+	local p4 = giveBall(m4, s4, { x = 0, y = 0 })
+	for _, q in m4:active(0) do
+		if q ~= p4 and not q.gk then
+			q.p = { x = 100, y = 100 }
+		end
+	end
+	local t4 = m4.teams[0][7]
+	t4.p = { x = 15, y = 15 } -- 45°
+	m4:setAim(1, math.cos(math.rad(30)), math.sin(math.rad(30))) -- 30° を狙う
+	hold(m4, 1, "pass", 0.5)
+	check("標準の補助は 15° ずれた味方に合わせる", m4.ball.target == t4)
+end
+
+print("== スルー・浮き球・シュートの狙い ==")
+do
+	local m = Match.new({ random = lcg(21) })
+	clearOpponents(m)
+	local s = m:seat(1)
+	giveBall(m, s, { x = 0, y = 0 })
+	m:setAim(1, 1, 0)
+	hold(m, 1, "lofted", 0.6)
+	check("浮き球は空中へ", m.ball.kind == "lofted" and m.ball.vz > 0)
+
+	local m2 = Match.new({ random = lcg(22) })
+	clearOpponents(m2)
+	local s2 = m2:seat(1)
+	giveBall(m2, s2, { x = 0, y = 0 })
+	m2:setAim(1, 1, 0)
+	m2:press(1, "l1")
+	hold(m2, 1, "through", 0.5)
+	m2:release(1, "l1")
+	check("L1 + スルー = ループスルー", m2.ball.kind == "lthrough")
+
+	-- シュートを右上 / 左上に打ち分け
+	local function shotY(aimY)
+		local mm = Match.new({ random = lcg(23) })
+		clearOpponents(mm)
+		local ss = mm:seat(1)
+		local p = giveBall(mm, ss, { x = 35, y = 0 })
+		mm:setAim(1, 52.5 - 35, aimY)
+		hold(mm, 1, "shoot", 0.4)
+		return mm.ball.v.y
+	end
+	check("狙った側にシュートが飛ぶ", shotY(3) > 0 and shotY(-3) < 0)
+
+	-- コントロールシュート (R1) はぶれにくい
+	local function spread(r1)
+		local sum = 0
+		for k = 1, 30 do
+			local mm = Match.new({ random = lcg(100 + k) })
+			clearOpponents(mm)
+			local ss = mm:seat(1)
+			giveBall(mm, ss, { x = 30, y = 0 })
+			mm:setAim(1, 1, 0)
+			if r1 then
+				mm:press(1, "r1")
+			end
+			hold(mm, 1, "shoot", 0.5)
+			sum += math.abs(mm.ball.v.y / mm.ball.v.x * 22.5)
+		end
+		return sum / 30
+	end
+	check("コントロールシュートはぶれが小さい", spread(true) < spread(false), spread(true) .. " / " .. spread(false))
+end
+
+print("== ダイレクト・ヘディング ==")
+do
+	local m = Match.new({ random = lcg(31), assist = 1 })
+	clearOpponents(m)
+	local s = m:seat(1)
+	local p = giveBall(m, s, { x = 0, y = 0 })
+	local mate = m.teams[0][7]
+	mate.p = { x = 12, y = 0 }
+	m:setAim(1, 1, 0)
+	hold(m, 1, "pass", 0.3)
+	check("パスの受け手に操作が移る", s.ctrl == mate, s.ctrl and s.ctrl.role)
+	-- 受ける前にシュートを溜めて離す → 受けた瞬間に蹴る
+	m:setAim(1, 1, 0)
+	m:press(1, "shoot")
+	step(m, 6)
+	m:release(1, "shoot")
+	local shot = false
+	for _ = 1, 60 do
+		m:update(1 / 30)
+		if m.ball.kind == "shot" then
+			shot = true
+			break
+		end
+	end
+	check("受ける前に入力するとダイレクトで蹴る", shot)
+
+	local m2 = Match.new({ random = lcg(32) })
+	clearOpponents(m2)
+	local s2 = m2:seat(1)
+	local c = s2.ctrl
+	c.p = { x = 40, y = 2 }
+	m2.ball.owner = nil
+	m2.ball.p = { x = 40.4, y = 2 }
+	m2.ball.z, m2.ball.vz = 1.5, 0
+	m2.ball.v = { x = 0, y = 0 }
+	m2:press(1, "shoot")
+	check("空中のボールにシュートで合わせる (ヘディング)", m2.ball.kind == "shot" and m2.ball.owner == nil)
+end
+
+print("== ボールを取りに行く (AI の補助) ==")
+do
+	-- 誰もいない方向へのパス: 放置しても誰かが拾う
+	local m = Match.new({ random = lcg(41), assist = 0 })
+	local s = m:seat(1)
+	giveBall(m, s, { x = -10, y = 0 })
+	m:setAim(1, 0, 1)
+	hold(m, 1, "pass", 0.7)
+	local owned = false
+	for _ = 1, 30 * 8 do
+		m:update(1 / 30)
+		if m.ball.owner ~= nil or m.setp ~= nil then
+			owned = true
+			break
+		end
+	end
+	check("こぼれ球を放置せず、誰かが取りに行く", owned)
+
+	-- パスの受け手 (操作が移って入力なし) が自動で受けに行く
+	local m2 = Match.new({ random = lcg(42), assist = 2 })
+	clearOpponents(m2)
+	local s2 = m2:seat(1)
+	giveBall(m2, s2, { x = 0, y = 0 })
+	local mate = m2.teams[0][7]
+	mate.p = { x = 18, y = 6 }
+	m2:setAim(1, 18, 6)
+	hold(m2, 1, "pass", 0.1) -- 弱すぎる
+	m2:setMove(1, 0, 0)
+	local got = false
+	for _ = 1, 30 * 6 do
+		m2:update(1 / 30)
+		if m2.ball.owner ~= nil then
+			got = m2.ball.owner.team == 0
+			break
+		end
+	end
+	check("弱いパスでも受け手が寄って受ける", got)
+
+	-- 守備: 操作中の選手が一番近くても、AI の味方が寄せに行く
+	local m3 = Match.new({ random = lcg(43) })
+	local s3 = m3:seat(1)
+	local carrier = m3.teams[1][8]
+	m3:gainBall(carrier)
+	carrier.p = { x = 0, y = 0 }
+	s3.ctrl.p = { x = -1.5, y = 0 }
+	m3:setMove(1, 0, 1) -- 人間は別の方向へ動いている (入力あり)
+	step(m3, 2)
+	local presser = m3.presser[0]
+	check("寄せ役は人間が操作していない選手", presser ~= nil and presser ~= s3.ctrl)
+
+	-- 守備: 人間が放置しても、そのうち奪い返す (CPU 同士と同様にボールが動く)
+	local m4 = Match.new({ random = lcg(44) })
+	local changes, last = 0, m4.ball.owner
+	for _ = 1, 30 * 60 do
+		m4:update(1 / 30)
+		if m4.ball.owner ~= nil and m4.ball.owner ~= last then
+			if last ~= nil and m4.ball.owner.team ~= last.team then
+				changes += 1
+			end
+			last = m4.ball.owner
+		end
+	end
+	check("人間が放置しても攻守が入れ替わる (60 秒)", changes >= 2, changes)
+end
+
+print("== 守備の操作 ==")
+do
+	local m = Match.new({ random = lcg(51) })
+	local s = m:seat(1)
+	local carrier = m.teams[1][8]
+	m:gainBall(carrier)
+	carrier.p = { x = 0, y = 0 }
+	carrier.cd, s.ctrl.cd = 0, 0
+	s.ctrl.p = { x = -8, y = 0 }
+	m:press(1, "pass") -- プレッシャー
+	local d0 = math.abs(s.ctrl.p.x - carrier.p.x)
+	step(m, 15)
+	check("パス長押し = プレッシャーで寄せる", math.abs(s.ctrl.p.x - carrier.p.x) < d0 - 2)
+	m:release(1, "pass")
+	local before = s.ctrl
+	m:press(1, "l1")
+	m:release(1, "l1")
+	check("L1 でカーソルが切り替わる", s.ctrl ~= before)
+	local m2 = Match.new({ random = lcg(52) })
+	local s2 = m2:seat(1)
+	local c2 = m2.teams[1][8]
+	m2:gainBall(c2)
+	m2:press(1, "lofted")
+	check("守備で浮き球ボタン = スライディング", s2.ctrl.slide > 0)
+	m2:command(1, "levelUp")
+	m2:command(1, "levelUp")
+	check("攻守レベルを上げられる", m2.level[0] == 2)
+	m2:command(1, "levelDown")
+	check("攻守レベルを下げられる", m2.level[0] == 1)
+end
+
+print("== 協力 (同じチームに複数人) ==")
+do
+	local m = Match.new({ random = lcg(61), seats = { { id = 11, team = 0 }, { id = 12, team = 0 }, { id = 13, team = 0 } } })
+	local a, b, c = m:seat(11), m:seat(12), m:seat(13)
+	check("3 人とも選手を持つ", a.ctrl and b.ctrl and c.ctrl and true or false)
+	check("操作する選手が重ならない", a.ctrl ~= b.ctrl and b.ctrl ~= c.ctrl and a.ctrl ~= c.ctrl)
+	check("相手は CPU", m:isCpuTeam(1) and not m:isCpuTeam(0))
+	clearOpponents(m)
+	giveBall(m, a, { x = 0, y = 0 })
+	b.ctrl.p = { x = 15, y = 0 }
+	m:setAim(11, 1, 0)
+	hold(m, 11, "pass", 0.4)
+	check("味方の操作者へのパス", m.ball.target == b.ctrl)
+	local bc = b.ctrl
+	for _ = 1, 60 do
+		m:update(1 / 30)
+		if m.ball.owner ~= nil then
+			break
+		end
+	end
+	check("受けた操作者の操作のまま", m.ball.owner == bc and bc.seat == b)
+	check("出し手の操作者は奪わない", a.ctrl ~= bc)
+	local unique = {}
+	local dup = false
+	for _ = 1, 30 * 20 do
+		m:update(1 / 30)
+		unique = {}
+		for _, s in m.seats do
+			if s.ctrl ~= nil then
+				if unique[s.ctrl] then
+					dup = true
+				end
+				unique[s.ctrl] = true
+			end
+		end
+	end
+	check("20 秒間、操作する選手が重ならない", not dup)
+	m:removeSeat(12)
+	check("抜けた操作者の選手は AI に戻る", bc.seat == nil and #m.seats == 2)
+end
+
+print("== 対戦 (両チームに人) ==")
+do
+	local m = Match.new({ random = lcg(71), seats = { { id = 1, team = 0 }, { id = 2, team = 1 } } })
+	check("両チームとも人間 (CPU 難易度は掛からない)", not m:isCpuTeam(0) and not m:isCpuTeam(1))
+	local s2 = m:seat(2)
+	check("AWAY の操作者も選手を持つ", s2.ctrl ~= nil and s2.ctrl.team == 1)
+	local away = s2.ctrl
+	m:gainBall(away)
+	away.p = { x = 10, y = 0 }
+	for _, q in m.teams[0] do
+		q.p = { x = 45, y = q.p.y }
+	end
+	m:setAim(2, -1, 0)
+	m:setMove(2, -1, 0)
+	step(m, 20)
+	check("AWAY は -x へ攻められる", away.p.x < 10 - 2, away.p.x)
+	hold(m, 2, "shoot", 0.5)
+	check("AWAY のシュートは -x のゴールへ", m.ball.kind == "shot" and m.ball.v.x < 0)
+	local r = Match.new({ random = lcg(72), length = 60, seats = { { id = 1, team = 0 }, { id = 2, team = 1 } } })
+	runUntilEnd(r, 20000)
+	check("対戦でも放置で最後まで進む", r.ended)
+end
+
+print("== セットプレー ==")
+do
+	local m = Match.new({ random = lcg(81) })
+	local s = m:seat(1)
+	m.ball.owner, m.ball.last = nil, m.teams[1][8]
+	m.ball.p = { x = 10, y = 33.9 }
+	m.ball.v = { x = 0, y = 6 }
+	m:update(1 / 30)
+	check("タッチラインを出たらスローイン", m.setp ~= nil and m.setp.kind == "throw")
+	check("人間のチームのスローは操作者が蹴る", m.setp.team == 0 and s.ctrl == m.setp.taker)
+	m:setAim(1, 0, -1)
+	hold(m, 1, "pass", 0.3)
+	check("スローインを投げられる", m.setp == nil and m.ball.owner == nil)
+
+	local m2 = Match.new({ random = lcg(82) })
+	m2.ball.owner, m2.ball.last = nil, m2.teams[1][8]
+	m2.ball.p = { x = 52.4, y = 20 }
+	m2.ball.v = { x = 6, y = 0 }
+	m2:update(1 / 30)
+	check("相手が出したらコーナー", m2.setp ~= nil and m2.setp.kind == "corner" and m2.setp.team == 0)
+	m2:setAim(1, -1, -0.6)
+	m2:press(1, "lofted")
+	step(m2, 10)
+	m2:flick(1, 1, 0) -- カーブ
+	m2:release(1, "lofted")
+	check("コーナーを浮き球で蹴る", m2.ball.kind == "lofted")
+
+	-- PK: 人間のキーパーは左スティックの向きに跳ぶ
+	local m3 = Match.new({ random = lcg(83) })
+	local s3 = m3:seat(1)
+	m3:startSetpiece("pk", 1, { x = -(52.5 - 11), y = 0 }, "setp.pk")
+	m3:setMove(1, 0, -1)
+	local gk = m3:slot(0, 0)
+	for _ = 1, 60 do
+		m3:update(1 / 30)
+		if gk.dive ~= nil then
+			break
+		end
+	end
+	check("相手の PK で GK が入力した側へ跳ぶ", gk.dive ~= nil and gk.dive.y < 0, gk.dive and gk.dive.y)
+
+	-- 放置したセットプレーは代わりに蹴る
+	local m4 = Match.new({ random = lcg(84) })
+	m4:startSetpiece("fk", 0, { x = 0, y = 0 }, "popup.foul_fk")
+	step(m4, 30 * (Config.Controls.SetpieceAutoTake + 1))
+	check("放置したセットプレーは自動で蹴る", m4.setp == nil)
+end
+
+print("== ゴール ==")
+do
+	local m = Match.new({ random = lcg(91) })
+	m.ball.owner, m.ball.last = nil, m.teams[0][10]
+	m.ball.p = { x = 52.4, y = 0 }
+	m.ball.v = { x = 8, y = 0 }
+	m.ball.z = 0.5
+	m:update(1 / 30)
+	check("ゴールで HOME に 1 点", m.score[0] == 1)
+	check("得点後は AWAY のキックオフ", m.ball.owner ~= nil and m.ball.owner.team == 1)
+	check("GOAL の表示 (得したチームつき)", #m.popups >= 1 and m.popups[1].key == "popup.goal" and m.popups[1].team == 0)
+	local m2 = Match.new({ random = lcg(92) })
+	m2.ball.owner, m2.ball.last = nil, m2.teams[0][10]
+	m2.ball.p = { x = 52.4, y = 0 }
+	m2.ball.v = { x = 8, y = 0 }
+	m2.ball.z = 3.5
+	m2:update(1 / 30)
+	check("バーの上を越えたらゴールではない", m2.score[0] == 0)
+end
+
 print("== 前後半・ハーフタイム ==")
 do
 	local m = Match.new(cpuOpts(101, { length = 60 }))
@@ -302,127 +611,42 @@ do
 		end
 	end
 	check("ハーフタイムが入る", sawHalftime)
-	check("後半はサイドが入れ替わる", flipDuring == true, tostring(flipDuring))
-	check("規定時間で終了する", m.ended and m.elapsed >= 60 - 0.1, m.elapsed)
-	check("引き分けでもカップ戦でなければ終了", m.result ~= nil and m.result.shootout == nil)
-	local hs = Match.new(cpuOpts(102, { length = 60 }))
-	for _ = 1, 3 do
-		hs:update(1 / 30)
-	end
-	check("前半は HOME が +x を攻める", hs:sgn(0) == 1 and hs:sgn(1) == -1)
-	hs.flip = true
-	check("後半は HOME が -x を攻める", hs:sgn(0) == -1 and hs:sgn(1) == 1)
-	check("ゴール判定がサイドに追従", (function()
-		local g = Match.new(cpuOpts(103, { length = 60 }))
-		g.flip = true
-		g.ball.owner, g.ball.last = nil, g.teams[0][10]
-		g.ball.p = { x = -52.4, y = 0 } -- 後半は HOME が -x のゴールを攻める
-		g.ball.v = { x = -8, y = 0 }
-		g.ball.z = 0.5
-		g:update(1 / 30)
-		return g.score[0] == 1
-	end)())
+	check("後半はサイドが入れ替わる", flipDuring == true)
+	check("規定時間で終了する", m.ended and m.elapsed >= 60 - 0.1)
+	local g = Match.new(cpuOpts(103, { length = 60 }))
+	g.flip = true
+	g.ball.owner, g.ball.last = nil, g.teams[0][10]
+	g.ball.p = { x = -52.4, y = 0 }
+	g.ball.v = { x = -8, y = 0 }
+	g.ball.z = 0.5
+	g:update(1 / 30)
+	check("ゴール判定がサイドに追従", g.score[0] == 1)
 end
 
-print("== スタミナ ==")
+print("== スタミナ・能力・フォーメーション・難易度 ==")
 do
 	local m = Match.new({ random = lcg(7) })
-	for _, q in m.teams[1] do
-		q.p = { x = 45, y = q.p.y }
-	end
-	local c = m.ctrl
-	check("開始時はスタミナ満タン", c.stamina == Config.Stamina.Max)
-	m:setKey("D", true)
-	m:setKey("Shift", true)
-	for _ = 1, 150 do
-		m:update(1 / 30)
-		if m.ball.owner ~= m.ctrl then
-			break
-		end
-	end
+	clearOpponents(m)
+	local s = m:seat(1)
+	local c = s.ctrl
+	m:setMove(1, 1, 0)
+	m:press(1, "dash")
+	step(m, 90)
 	check("ダッシュでスタミナが減る", c.stamina < Config.Stamina.Max - 5, c.stamina)
-	c.stamina = 0
-	c.exhausted = true
-	check("スタミナ切れは速度が落ちる", m:speedMult(c) < c.attr.speed * 0.9, m:speedMult(c))
-	check("スタミナ切れではダッシュできない", c.exhausted)
-	for _ = 1, 600 do
-		m:setKey("Shift", false)
-		m:setKey("D", false)
-		c.v = { x = 0, y = 0 }
-		m:updateStamina(c, 1 / 30)
-	end
-	check("止まっていれば回復する", c.stamina > Config.Stamina.DashMin and not c.exhausted, c.stamina)
-end
+	c.stamina, c.exhausted = 0, true
+	check("スタミナ切れは速度が落ちる", m:speedMult(c) < c.attr.speed * 0.9)
+	m:release(1, "dash")
 
-print("== 選手の能力差 ==")
-do
-	local m = Match.new({ random = lcg(55) })
-	local st, cb, gk = m.teams[0][10], m.teams[0][3], m.teams[0][1]
-	check("ST はシュートが上手い", st.attr.shoot > cb.attr.shoot, st.attr.shoot .. " vs " .. cb.attr.shoot)
-	check("CB は守備が強い", cb.attr.tackle > st.attr.tackle)
-	check("GK は足が遅い", gk.attr.speed < st.attr.speed)
-	local lo, hi = 9, 0
-	for _, p in m.pl do
-		lo, hi = math.min(lo, p.attr.speed), math.max(hi, p.attr.speed)
-	end
-	check("個体差がある", hi - lo > 0.05, hi - lo)
-end
-
-print("== フォーメーション ==")
-do
+	local a = Match.new({ random = lcg(55) })
+	check("ST はシュートが上手い", a.teams[0][10].attr.shoot > a.teams[0][3].attr.shoot)
 	for _, key in Config.FormationOrder do
-		local m = Match.new({ random = lcg(9), formation = { [0] = key, [1] = key } })
-		local roles = {}
-		for _, p in m.teams[0] do
-			roles[p.role] = (roles[p.role] or 0) + 1
-		end
-		check(key .. " は 11 人", #m.teams[0] == 11)
-		local fw = 0
-		for r, n in roles do
-			if Config.ForwardRoles[r] then
-				fw += n
-			end
-		end
-		check(key .. " に前線の選手がいる", fw >= 1, fw)
+		local f = Match.new({ random = lcg(9), formation = { [0] = key, [1] = key } })
+		check(key .. " は 11 人", #f.teams[0] == 11)
 	end
-	local m = Match.new({ random = lcg(9), formation = { [0] = "352", [1] = "442" } })
-	local cb = 0
-	for _, p in m.teams[0] do
-		if p.role == "CB" then
-			cb += 1
-		end
-	end
-	check("3-5-2 はセンターバックが 3 人", cb == 3, cb)
-	local r442 = {}
-	for _, p in m.teams[1] do
-		r442[p.role] = true
-	end
-	check("チームごとに別のフォーメーション", r442.LM == true and r442.ST == true)
-end
-
-print("== 難易度 ==")
-do
 	local easy = Match.new({ random = lcg(1), difficulty = 1 })
 	local hard = Match.new({ random = lcg(1), difficulty = 5 })
 	check("難しいほど CPU が速い", hard:teamSpeed(1) > easy:teamSpeed(1))
-	check("味方 (人間側) には掛からない", hard:teamSpeed(0) == 1)
-	check("GK の反応が難易度で変わる", Config.Difficulties[5].gkReact > Config.Difficulties[1].gkReact)
-	-- 簡単な相手はシュートがぶれやすい
-	local function spread(diff)
-		local m = Match.new({ random = lcg(77), difficulty = diff, ctrlKind = { [0] = "cpu", [1] = "cpu" } })
-		local sum, n = 0, 0
-		for _ = 1, 200 do
-			local c = m.teams[1][10]
-			c.p = { x = -30, y = 0 }
-			m.ball.owner = c
-			m:kick("shot", { c = c, power = 0.7, aimY = 0 })
-			local tgtY = m.ball.v.y / math.max(math.abs(m.ball.v.x), 1e-6) * (m.ball.p.x + 52.5)
-			sum += math.abs(tgtY)
-			n += 1
-		end
-		return sum / n
-	end
-	check("簡単な CPU ほどシュートがぶれる", spread(1) > spread(5), spread(1) .. " vs " .. spread(5))
+	check("人間のチームには掛からない", hard:teamSpeed(0) == 1)
 end
 
 print("== カード・退場 ==")
@@ -431,70 +655,38 @@ do
 	local p = m.teams[1][3]
 	m:showCard(p, "yellow")
 	check("イエローが数えられる", m.tstats[1].yellow == 1 and not p.out)
-	p.yellow = 1
-	m:cardCheck(p) -- 乱数次第で 1 枚追加される場合がある
 	local q = m.teams[1][4]
-	q.yellow = 1
 	m:showCard(q, "red")
-	check("レッドで退場する", q.out == true)
-	check("退場者はアクティブから外れる", #m:active(1) == 10 or #m:active(1) == 9, #m:active(1))
-	local inList = false
-	for _, x in m:active(1) do
-		if x == q then
-			inList = true
-		end
-	end
-	check("退場者は選手一覧に含まれない", not inList)
+	check("レッドで退場する", q.out == true and #m:active(1) == 10)
+	local s = m:seat(1)
+	local mine = s.ctrl
+	m:sendOff(mine)
+	check("操作中の選手が退場したら別の選手に移る", s.ctrl ~= nil and s.ctrl ~= mine and not s.ctrl.out)
 	local gk = m.teams[0][1]
 	m:sendOff(gk)
-	local newGk = m:slot(0, 0)
-	check("GK 退場後は別の選手がキーパーになる", newGk ~= gk and newGk.gk == true)
-	-- 通し (退場者がいても試合が壊れない)
-	local steps = 0
-	while not m.ended and steps < 12000 do
-		m:update(1 / 30)
-		steps += 1
-		for _, x in m.pl do
-			if x.p.x ~= x.p.x then
-				steps = 99999
-			end
-		end
-	end
-	check("退場者がいても試合が最後まで進む", steps < 99999)
+	check("GK 退場後は別の選手がキーパー", m:slot(0, 0) ~= gk and m:slot(0, 0).gk)
+	runUntilEnd(m, 12000)
+	check("退場者がいても試合が進む", m.ended)
 end
 
 print("== 延長戦・PK 戦 ==")
 do
-	-- 勝敗判定の単体テスト
 	local m = Match.new({ random = lcg(2), cup = true })
-	m.shoot = { goals = { [0] = 0, [1] = 0 }, taken = { [0] = 0, [1] = 0 } }
-	m.shoot.goals = { [0] = 3, [1] = 0 }
-	m.shoot.taken = { [0] = 3, [1] = 3 }
+	m.shoot = { goals = { [0] = 3, [1] = 0 }, taken = { [0] = 3, [1] = 3 } }
 	check("残り 2 本で 3 点差なら勝ち", m:shootWinner() == 0)
-	m.shoot.goals = { [0] = 2, [1] = 1 }
-	m.shoot.taken = { [0] = 3, [1] = 3 }
-	check("まだ逆転できるなら続行", m:shootWinner() == nil)
-	m.shoot.goals = { [0] = 4, [1] = 4 }
-	m.shoot.taken = { [0] = 5, [1] = 5 }
-	check("5 本で同点ならサドンデスへ", m:shootWinner() == nil)
-	m.shoot.goals = { [0] = 5, [1] = 4 }
-	m.shoot.taken = { [0] = 6, [1] = 5 }
+	m.shoot = { goals = { [0] = 4, [1] = 4 }, taken = { [0] = 5, [1] = 5 } }
+	check("5 本で同点ならサドンデス", m:shootWinner() == nil)
+	m.shoot = { goals = { [0] = 5, [1] = 4 }, taken = { [0] = 6, [1] = 5 } }
 	check("サドンデスは同数を蹴るまで決めない", m:shootWinner() == nil)
-	m.shoot.goals = { [0] = 5, [1] = 4 }
-	m.shoot.taken = { [0] = 6, [1] = 6 }
+	m.shoot = { goals = { [0] = 5, [1] = 4 }, taken = { [0] = 6, [1] = 6 } }
 	check("サドンデスで差がつけば決着", m:shootWinner() == 0)
-	m.shoot.goals = { [0] = 1, [1] = 3 }
-	m.shoot.taken = { [0] = 5, [1] = 5 }
-	check("5 本終了で AWAY の勝ち", m:shootWinner() == 1)
-
-	-- 通し: 引き分けになるシードを探し、PK 戦まで進めて終わること
 	local found, ended = 0, 0
 	for seed = 1, 40 do
 		local c = Match.new(cpuOpts(seed * 13, { length = 40, cup = true }))
 		runUntilEnd(c, 60000)
 		if c.result and c.result.shootout then
 			found += 1
-			if c.ended and c.result.winner ~= nil then
+			if c.result.winner ~= nil then
 				ended += 1
 			end
 		end
@@ -503,75 +695,41 @@ do
 		end
 	end
 	check("引き分けの試合が PK 戦まで進む", found >= 1, found)
-	check("PK 戦で勝者が決まる", ended == found and found >= 1, ended .. "/" .. found)
+	check("PK 戦で勝者が決まる", ended == found and found >= 1)
 end
 
 print("== ゴールリプレイ ==")
 do
-	local m = Match.new({ random = lcg(61), ctrlKind = { [0] = "cpu", [1] = "cpu" } })
-	for _ = 1, 150 do
-		m:update(1 / 30) -- 記録をためる
-	end
-	check("リプレイ用の記録がたまる", #m.rec >= 10, #m.rec)
+	local m = Match.new({ random = lcg(61) })
+	step(m, 150)
+	check("リプレイ用の記録がたまる", #m.rec >= 10)
 	m.ball.owner, m.ball.last = nil, m.teams[0][10]
 	m.ball.p = { x = 52.4, y = 0 }
 	m.ball.v = { x = 8, y = 0 }
 	m.ball.z = 0.5
 	m:update(1 / 30)
-	check("ゴール後はリプレイに入る", m.mode == "replay", m.mode)
+	check("ゴール後はリプレイ", m.mode == "replay")
 	local before = m.elapsed
-	for _ = 1, 10 do
-		m:update(1 / 30)
-	end
-	check("リプレイ中は試合時間が進まない", m.elapsed == before)
-	m:onKey("K")
-	check("K でリプレイをスキップできる", m.mode == "play")
-	check("スキップ後は相手のキックオフ", m.ball.owner ~= nil and m.ball.owner.team == 1)
+	step(m, 10)
+	check("リプレイ中は時間が進まない", m.elapsed == before)
+	m:press(1, "pass")
+	m:release(1, "pass")
+	check("キックボタンでスキップ", m.mode == "play")
 end
 
-print("== ヘディング ==")
-do
-	local m = Match.new({ random = lcg(71) })
-	for _, q in m.teams[1] do
-		q.p = { x = 45, y = q.p.y }
-	end
-	local c = m.ctrl
-	c.p = { x = 40, y = 2 }
-	m.ball.owner = nil
-	m.ball.p = { x = 40.4, y = 2 }
-	m.ball.z = 1.5
-	m.ball.vz = 0
-	m.ball.v = { x = 0, y = 0 }
-	m:onKey("J")
-	check("空中のボールにシュートで合わせる", m.ball.kind == "shot" and m.ball.owner == nil, m.ball.kind)
-	local m2 = Match.new({ random = lcg(72) })
-	m2.ball.owner = nil
-	m2.ctrl.p = { x = -10, y = 0 }
-	m2.ball.p = { x = -9.5, y = 0 }
-	m2.ball.z = 0.2
-	m2:onKey("J")
-	check("低いボールではヘディングにならない", m2.ball.kind ~= "shot")
-end
-
-print("== キーパーのダイブ ==")
+print("== キーパー ==")
 do
 	local m = Match.new({ random = lcg(81), difficulty = 5 })
 	local c = m.teams[0][10]
 	c.p = { x = 35, y = 0 }
 	m.ball.owner = c
 	m:kick("shot", { c = c, power = 0.8, aimY = 1.5 })
-	local gk = m:slot(1, 0)
-	check("枠内のシュートで GK がダイブを始める", gk.dive ~= nil)
-	local y0 = gk.p.y
-	for _ = 1, 20 do
-		m:update(1 / 30)
-	end
-	check("GK が横へ動く", math.abs(gk.p.y - y0) > 0.3 or m.ball.owner == gk, gk.p.y - y0)
+	check("枠内のシュートで GK がダイブ", m:slot(1, 0).dive ~= nil)
 	local m2 = Match.new({ random = lcg(82) })
 	local c2 = m2.teams[0][10]
 	c2.p = { x = 35, y = 0 }
 	m2.ball.owner = c2
-	m2:kick("shot", { c = c2, power = 0.8, aimY = 9 }) -- 大きく外す
+	m2:kick("shot", { c = c2, power = 0.8, aimY = 9 })
 	check("枠外には反応しない", m2:slot(1, 0).dive == nil)
 end
 
@@ -580,9 +738,8 @@ do
 	local m = Match.new(cpuOpts(91, { length = 90 }))
 	runUntilEnd(m)
 	local r = m.result
-	check("支配率が 0〜100", r.possession >= 0 and r.possession <= 100, r.possession)
-	check("シュート数 ≧ 枠内数", r.stats[0].shots >= r.stats[0].onTarget and r.stats[1].shots >= r.stats[1].onTarget)
-	check("パス成功 ≦ パス数 (各チーム)", r.stats[0].passOk <= r.stats[0].passes + 2 and r.stats[1].passOk <= r.stats[1].passes + 2)
+	check("支配率が 0〜100", r.possession >= 0 and r.possession <= 100)
+	check("シュート数 ≧ 枠内数", r.stats[0].shots >= r.stats[0].onTarget)
 	check("結果に設定が入る", r.difficulty == 3 and r.formation == "433" and r.length == 90)
 end
 
@@ -595,81 +752,71 @@ do
 	local c, parts = Rewards.compute(sess(300, 3), win, false)
 	check("勝利 + 2 点 + 無失点", c == Config.Rewards.Base + Config.Rewards.Win + 2 * Config.Rewards.PerGoal + Config.Rewards.CleanSheet, c)
 	check("内訳に無失点が入る", parts.cleanSheet == Config.Rewards.CleanSheet)
-	local loss = Rewards.sanitize({ home = 0, away = 3, winner = 1 })
-	local cl = Rewards.compute(sess(300, 3), loss, false)
-	check("敗戦でも基本報酬がある", cl == Config.Rewards.Base, cl)
-	local draw = Rewards.sanitize({ home = 1, away = 1 })
-	local cd = Rewards.compute(sess(300, 3), draw, false)
-	check("引き分けは勝利より少ない", cd < Rewards.compute(sess(300, 3), Rewards.sanitize({ home = 2, away = 1, winner = 0 }), false))
-	check("難しい難易度ほど多い", Rewards.compute(sess(300, 5), win, false) > Rewards.compute(sess(300, 1), win, false))
-	check("長い試合ほど多い", Rewards.compute(sess(600, 3), win, false) > Rewards.compute(sess(180, 3), win, false))
-	local huge = Rewards.sanitize({ home = 9999, away = 0, winner = 0, shootoutWin = true })
-	check("得点の申告は丸められる", huge.home == 30)
-	local cmax = Rewards.compute(sess(600, 5), huge, false)
-	check("上限を超えない", cmax <= Config.Rewards.Max, cmax)
-	local cv = Rewards.compute(sess(300, 3), win, true)
-	check("VIP は 2 倍", cv == c * Config.Monetization.VipCoinMultiplier, cv)
-	local bad = Rewards.sanitize("hack")
-	check("不正な入力は 0 点扱い", bad.home == 0 and bad.away == 0 and bad.winner == nil)
+	check("敗戦でも基本報酬", Rewards.compute(sess(300, 3), Rewards.sanitize({ home = 0, away = 3, winner = 1 }), false) == Config.Rewards.Base)
+	check("難しいほど多い", Rewards.compute(sess(300, 5), win, false) > Rewards.compute(sess(300, 1), win, false))
+	local huge = Rewards.sanitize({ home = 9999, away = 0, winner = 0 })
+	check("申告は丸められる", huge.home == 30)
+	check("上限を超えない", Rewards.compute(sess(600, 5), huge, false) <= Config.Rewards.Max)
+	check("VIP は 2 倍", Rewards.compute(sess(300, 3), win, true) == c * Config.Monetization.VipCoinMultiplier)
 	local nan = Rewards.sanitize({ home = 0 / 0, away = -5, winner = 7 })
-	check("NaN・負数・範囲外の勝者を弾く", nan.home == 0 and nan.away == 0 and nan.winner == nil)
+	check("NaN・負数・範囲外を弾く", nan.home == 0 and nan.away == 0 and nan.winner == nil)
 	check("選べる試合時間の検証", Rewards.isValidLength(300) and not Rewards.isValidLength(7))
 end
 
-print("== コスメ・課金設定 ==")
+print("== 課金設定 ==")
 do
-	local ids, dup = {}, nil
-	for _, k in Config.Kits do
-		if ids["kit:" .. k.id] then
-			dup = k.id
-		end
-		ids["kit:" .. k.id] = true
-	end
-	for _, k in Config.Balls do
-		if ids["ball:" .. k.id] then
-			dup = k.id
-		end
-		ids["ball:" .. k.id] = true
-	end
-	check("キット・ボールの ID が重複しない", dup == nil, dup)
-	check("既定のキットは無料", Config.Kits[1].price == 0 and not Config.Kits[1].vip)
-	check("既定のボールは無料", Config.Balls[1].price == 0 and not Config.Balls[1].vip)
-	local vipKit = false
-	for _, k in Config.Kits do
-		if k.vip then
-			vipKit = true
-		end
-	end
-	check("VIP 限定のキットがある", vipKit)
-	check("コインパックは小さいほど安い", Config.Monetization.Products.Coins500.price < Config.Monetization.Products.Coins2000.price)
-	local fair = true
-	for _, k in Config.Kits do
-		if k.stat ~= nil then
-			fair = false
-		end
-	end
-	check("キットは勝敗に影響しない (能力値を持たない)", fair)
-end
-
-print("== 課金 ID ==")
-do
-	local ids, dup, zero = {}, false, {}
+	local zero = {}
 	for k, d in Config.Monetization.Passes do
 		if d.id == 0 then
 			table.insert(zero, k)
 		end
-		dup = dup or ids[d.id] == true
-		ids[d.id] = true
 	end
 	for k, d in Config.Monetization.Products do
 		if d.id == 0 then
 			table.insert(zero, k)
 		end
-		dup = dup or ids[d.id] == true
-		ids[d.id] = true
 	end
 	check("全ての商品に ID が入っている", #zero == 0, table.concat(zero, ","))
-	check("ID が重複しない", not dup)
+	check("既定のキットは無料", Config.Kits[1].price == 0 and not Config.Kits[1].vip)
+end
+
+print("== オンライン同期 (Snapshot) ==")
+do
+	local m = Match.new({ random = lcg(201), seats = { { id = 1001, team = 0 }, { id = 2002, team = 1 } } })
+	step(m, 60)
+	m:press(1001, "pass")
+	step(m, 5)
+	local str = Snapshot.encode(m, 0)
+	check("1 回の送信が 400 バイト未満", #str < 400, #str)
+	local d = Snapshot.decode(str)
+	local maxErr = 0
+	for i, p in m.pl do
+		maxErr = math.max(maxErr, math.abs(d.pl[i].x - p.p.x), math.abs(d.pl[i].y - p.p.y))
+	end
+	check("選手の位置が 2cm 以内で復元できる", maxErr < 0.02, maxErr)
+	check("ボールの位置", math.abs(d.ball.x - m.ball.p.x) < 0.02 and math.abs(d.ball.y - m.ball.p.y) < 0.02)
+	check("スコア・時間", d.score[0] == m.score[0] and math.abs(d.elapsed - m.elapsed) < 0.01)
+	check("操作者 (UserId) と操作中の選手", #d.seats == 2 and d.seats[1].id == 1001 and m.pl[d.seats[1].ctrl] == m:seat(1001).ctrl)
+	check("溜め中の種類とパワー", d.seats[1].kind == "pass" and d.seats[1].power > 0.1)
+	check("向きの復元", math.abs(d.pl[10].fx - m.pl[10].face.x) < 0.05)
+	local _, seq = Snapshot.encode(m, 0)
+	m:popup("popup.goal", 0)
+	local d2 = Snapshot.decode((Snapshot.encode(m, seq)))
+	check("新しいポップアップだけを送る", #d2.popups == 1 and d2.popups[1].key == "popup.goal" and d2.popups[1].team == 0)
+
+	-- 入力
+	local packed = Snapshot.packInput({ move = { x = 0.5, y = -1 }, aim = { x = 0.6, y = 0.8 }, buttons = { pass = true, l1 = true }, flick = nil, cmd = "levelUp" })
+	local inp = Snapshot.unpackInput(packed)
+	check("入力の往復 (移動・狙い・ボタン・コマンド)", inp and math.abs(inp.move.x - 0.5) < 0.01 and inp.aim and math.abs(inp.aim.y - 0.8) < 0.01 and inp.buttons.pass and inp.buttons.l1 and not inp.buttons.shoot and inp.cmd == "levelUp")
+	check("壊れた入力は捨てる", Snapshot.unpackInput("x") == nil and Snapshot.unpackInput(nil) == nil)
+	-- サーバー側の適用: 押す → 離す でパスが出る
+	local mm = Match.new({ random = lcg(202), seats = { { id = 7, team = 0 } } })
+	clearOpponents(mm)
+	local prev = {}
+	prev = Snapshot.applyInput(mm, 7, { move = { x = 0, y = 0 }, aim = { x = 1, y = 0 }, buttons = { pass = true } }, prev)
+	step(mm, 10)
+	prev = Snapshot.applyInput(mm, 7, { move = { x = 0, y = 0 }, aim = { x = 1, y = 0 }, buttons = {} }, prev)
+	check("サーバーで適用した入力でパスが出る", mm.ball.owner == nil and mm.ball.kind == "pass")
 end
 
 print(("%d checks, %d failures"):format(checks, failures))

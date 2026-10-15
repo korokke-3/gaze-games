@@ -126,9 +126,14 @@ local services = {
 	StarterGui = { SetCoreGuiEnabled = function() end },
 	UserInputService = {
 		TouchEnabled = true,
+		KeyboardEnabled = true,
 		InputBegan = NewSignal(nil, "InputBegan"),
 		InputEnded = NewSignal(nil, "InputEnded"),
 		InputChanged = NewSignal(nil, "InputChanged"),
+		TouchStarted = NewSignal(nil, "TouchStarted"),
+		GetMouseLocation = function()
+			return Vector2.new(640, 360)
+		end,
 	},
 	MarketplaceService = market,
 	DataStoreService = dataStoreService,
@@ -155,16 +160,16 @@ local function node(parent, name, modulePath)
 	return n
 end
 Shared = node(rs, "Shared")
-for _, nme in { "Config", "Locale", "Rewards", "Match", "Net" } do
+for _, nme in { "Config", "Locale", "Rewards", "Match", "Net", "Snapshot" } do
 	node(Shared, nme, "shared/" .. nme)
 end
 ClientRoot = node(nil, "Client", "client/init")
-for _, nme in { "World", "Hud", "Input", "Menu", "Sfx" } do
+for _, nme in { "World", "Hud", "Input", "Menu", "Sfx", "RemoteMatch" } do
 	node(ClientRoot, nme, "client/" .. nme)
 end
 ServerRoot = node(nil, "Server", "server/init")
 local servicesFolder = node(ServerRoot, "Services")
-for _, nme in { "Data", "Store", "Matches", "Monetization" } do
+for _, nme in { "Data", "Store", "Matches", "Monetization", "Rooms" } do
 	node(servicesFolder, nme, "server/Services/" .. nme)
 end
 
