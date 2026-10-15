@@ -148,3 +148,8 @@ classic / wet_4pt / wet_allpts / hybrid を同じデータで学習・評価し�
 
 ## ライセンス表記
 WebEyeTrack（MIT）の学習済み重みとコードを変換・移植した部分、および MediaPipe（Apache 2.0）のモデルを含みます。詳細は [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) を参照してください。個人の較正データや録画（`profiles/`）は、このリポジトリに含まれません。
+
+## Roblox 版 (視線なし)
+
+11人制サッカーを、視線トラッキングを外して Roblox 向けに移植したものが
+[`roblox-soccer11/`](roblox-soccer11/) にある。Python / Webカメラ不要で、Rojo で Roblox Studio に読み込む。

@@ -1,0 +1,6 @@
+# rojo build で再生成できる
+*.rbxl
+*.rbxlx
+*.rbxl.lock
+*.rbxlx.lock
+.DS_Store
