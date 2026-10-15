@@ -13,8 +13,9 @@ Python / Webカメラには一切依存しない。
 
 - 公開済み: Universe `10771015719` / Place `86418072397733` (Soccer 11)。
 - 試合ロジック (`src/shared/Match.luau`) と報酬計算は、Studio 無しの自動テスト (118 項目) が通っている。
-- **Roblox Studio 上での実機確認は、描画・入力・HUD・ショップ UI について未実施。** 構文チェックと
-  `rojo build` までは通っている。最初に Studio で F5 を押して確認してほしい。
+- クライアント / サーバーは、Roblox API のスタブ上での通し実行 (`tests/smoke.sh`: メニュー・ショップ・試合・結果・購入・保存・報酬) まで通っている。
+- **Roblox Studio / 実機での確認は未実施** (見た目・カメラ・操作感・購入ダイアログ)。スタブは API の呼び方までしか
+  検証しない。最初に Studio で F5 を押して確認してほしい。
 - 課金 (ゲームパス 2 / コインパック 3) は作成済み。購入フローは実機未確認。
 - 効果音は Roblox 内蔵のものだけ。歓声・実況・BGM は未実装。
 
@@ -89,6 +90,7 @@ docs/EFOOTBALL_GAP.md       eFootball との違いと対応状況
 rokit install              # rojo が入る
 ./check.sh                 # 構文チェック
 ./tests/run.sh             # 試合ロジック・報酬の検証 (luau CLI が必要)
+./tests/smoke.sh           # Roblox API のスタブ上で、クライアント / サーバーを通しで実行
 rojo build --output Soccer11.rbxl
 rojo serve                 # Studio の Rojo プラグインで Connect → F5
 ```
