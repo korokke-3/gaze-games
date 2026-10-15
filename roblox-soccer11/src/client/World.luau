@@ -157,10 +157,14 @@ end
 local World = {}
 World.__index = World
 
-function World.new(match, lang)
+--[[
+	style: { kit = { color, keeper }, ball = { color, trail }, camera = 1..3 }  (見た目だけ。勝敗に影響しない)
+]]
+function World.new(match, lang, style)
 	local self = setmetatable({}, World)
 	self.match = match
 	self.lang = lang
+	self.style = style or {}
 	self.folder = Instance.new("Folder")
 	self.folder.Name = "SoccerWorld"
 	self.folder.Parent = Workspace
@@ -168,12 +172,7 @@ function World.new(match, lang)
 
 	self.actors = {} -- player -> { body, nose, shadow, cursor, nextMark, skill, skillUntil }
 	for _, pl in match.pl do
-		local col
-		if pl.team == 0 then
-			col = pl.gk and Config.View.HomeKeeperColor or Config.View.HomeColor
-		else
-			col = pl.gk and Config.View.AwayKeeperColor or Config.View.AwayColor
-		end
+		local col = self:colorFor(pl)
 		local body = newPart({
 			Name = "Player",
 			Shape = Enum.PartType.Ball,
@@ -215,12 +214,30 @@ function World.new(match, lang)
 		}
 	end
 
+	local ballStyle = self.style.ball
 	self.ball = newPart({
 		Name = "Ball",
 		Shape = Enum.PartType.Ball,
 		Size = Vector3.new(1.7, 1.7, 1.7),
-		Color = Color3.new(1, 1, 1),
+		Color = ballStyle and rgb(ballStyle.color) or Color3.new(1, 1, 1),
 	}, self.folder)
+	if ballStyle and ballStyle.trail then
+		local a0 = Instance.new("Attachment")
+		a0.Position = Vector3.new(0, 0.5, 0)
+		a0.Parent = self.ball
+		local a1 = Instance.new("Attachment")
+		a1.Position = Vector3.new(0, -0.5, 0)
+		a1.Parent = self.ball
+		local tr = Instance.new("Trail")
+		tr.Attachment0, tr.Attachment1 = a0, a1
+		tr.Color = ColorSequence.new(rgb(ballStyle.trail))
+		tr.Transparency = NumberSequence.new(0.2, 1)
+		tr.Lifetime = 0.45
+		tr.LightEmission = 0.6
+		tr.Enabled = false
+		tr.Parent = self.ball
+		self.trail = tr
+	end
 	self.ballShadow = newPart({
 		Name = "BallShadow",
 		Shape = Enum.PartType.Cylinder,
@@ -231,6 +248,18 @@ function World.new(match, lang)
 	local m = match.ball.p
 	self.focus = Vector3.new(m.x * S, 0, m.y * S)
 	return self
+end
+
+--- 選手の色 (自チームはキットの設定、キーパーは別色)。
+function World:colorFor(pl)
+	local kit = self.style.kit
+	if pl.team == 0 then
+		if kit then
+			return pl.gk and kit.keeper or kit.color
+		end
+		return pl.gk and Config.View.HomeKeeperColor or Config.View.HomeColor
+	end
+	return pl.gk and Config.View.AwayKeeperColor or Config.View.AwayColor
 end
 
 function World:destroy()
@@ -250,6 +279,16 @@ function World:step(dt)
 	end
 
 	for pl, a in self.actors do
+		if pl.out then
+			-- 退場した選手は画面から消す
+			local away = Vector3.new(0, -500, 0)
+			a.body.Position = away
+			a.nose.Position = away
+			a.shadow.Position = away
+			a.cursor.Enabled, a.nextMark.Enabled, a.skill.Enabled = false, false, false
+			continue
+		end
+		a.baseColor = rgb(self:colorFor(pl))
 		local pos = toWorld(pl.p.x, pl.p.y, 1.4)
 		a.body.Position = pos
 		local fwd = Vector3.new(pl.face.x, 0, pl.face.y)
@@ -278,6 +317,9 @@ function World:step(dt)
 	local bz = 0.9 + b.z * S * 0.8
 	self.ball.Position = toWorld(b.p.x, b.p.y, bz)
 	self.ballShadow.CFrame = CFrame.new(toWorld(b.p.x, b.p.y, 0.1)) * CFrame.Angles(0, 0, math.rad(90))
+	if self.trail then
+		self.trail.Enabled = math.sqrt(b.v.x * b.v.x + b.v.y * b.v.y) > 9
+	end
 end
 
 --- ボールを追うカメラ。画面に約 HalfWidth*2 [m] を映し、コート外を映しすぎないよう範囲を制限する。
@@ -290,8 +332,9 @@ function World:updateCamera(dt)
 		cam.CameraType = Enum.CameraType.Scriptable
 	end
 	local V = Config.View
+	local half = V.CameraPresets[self.style.camera or 2] or V.HalfWidth
 	local b = self.match.ball.p
-	local limX = math.max(0, PL / 2 + 4 - V.HalfWidth)
+	local limX = math.max(0, PL / 2 + 4 - half)
 	local limY = math.max(0, PW / 2 + 4 - V.HalfHeight)
 	local target = Vector3.new(math.clamp(b.x, -limX, limX) * S, 0, math.clamp(b.y, -limY, limY) * S)
 	local k = math.min(1, dt * V.CameraFollow)
@@ -302,7 +345,7 @@ function World:updateCamera(dt)
 	local aspect = vp.X / math.max(vp.Y, 1)
 	cam.FieldOfView = 50
 	local hFov = 2 * math.atan(math.tan(math.rad(cam.FieldOfView / 2)) * aspect)
-	local dist = (V.HalfWidth * S) / math.tan(hFov / 2)
+	local dist = (half * S) / math.tan(hFov / 2)
 	local dir = Vector3.new(V.CameraDir[1], V.CameraDir[2], V.CameraDir[3]).Unit
 	cam.CFrame = CFrame.lookAt(self.focus + dir * dist, self.focus)
 end

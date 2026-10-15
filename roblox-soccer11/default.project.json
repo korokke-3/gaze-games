@@ -2,32 +2,48 @@
   "name": "Soccer11",
   "tree": {
     "$className": "DataModel",
-
     "ReplicatedStorage": {
-      "Shared": { "$path": "src/shared" }
-    },
-
-    "StarterPlayer": {
-      "StarterPlayerScripts": {
-        "Client": { "$path": "src/client" }
+      "Shared": {
+        "$path": "src/shared"
       }
     },
-
+    "StarterPlayer": {
+      "StarterPlayerScripts": {
+        "Client": {
+          "$path": "src/client"
+        }
+      }
+    },
     "Lighting": {
       "$properties": {
-        "Ambient": [0.45, 0.45, 0.5],
-        "OutdoorAmbient": [0.55, 0.55, 0.6],
+        "Ambient": [
+          0.45,
+          0.45,
+          0.5
+        ],
+        "OutdoorAmbient": [
+          0.55,
+          0.55,
+          0.6
+        ],
         "Brightness": 2,
         "ClockTime": 14
       }
     },
-
     "Workspace": {
-      "$properties": { "StreamingEnabled": false }
+      "$properties": {
+        "StreamingEnabled": false
+      }
     },
-
     "Players": {
-      "$properties": { "CharacterAutoLoads": false }
+      "$properties": {
+        "CharacterAutoLoads": false
+      }
+    },
+    "ServerScriptService": {
+      "Server": {
+        "$path": "src/server"
+      }
     }
   }
 }

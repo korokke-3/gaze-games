@@ -78,6 +78,36 @@ function Hud.new(lang)
 	})
 	self.scoreText = text(self.scoreBar, { Size = UDim2.new(1, -16, 1, -8), Position = UDim2.fromOffset(8, 4) })
 
+	-- 前後半の表示 / PK 戦の経過 / リプレイ
+	self.periodText = text(self.gui, {
+		AnchorPoint = Vector2.new(0.5, 0),
+		Position = UDim2.new(0.5, 0, 0, 54),
+		Size = UDim2.fromOffset(300, 20),
+		TextSize = 14,
+		TextScaled = false,
+		TextColor3 = Color3.fromRGB(200, 230, 210),
+	})
+	self.replayText = text(self.gui, {
+		AnchorPoint = Vector2.new(0, 0),
+		Position = UDim2.fromOffset(16, 64),
+		Size = UDim2.fromOffset(300, 34),
+		TextColor3 = Color3.fromRGB(255, 120, 120),
+		TextXAlignment = Enum.TextXAlignment.Left,
+		Visible = false,
+	})
+	-- スタミナ
+	self.staminaBar = panel(self.gui, {
+		AnchorPoint = Vector2.new(0.5, 1),
+		Position = UDim2.new(0.5, 0, 1, -40),
+		Size = UDim2.fromOffset(220, 10),
+	})
+	self.staminaFill = new("Frame", {
+		BackgroundColor3 = Color3.fromRGB(120, 230, 120),
+		BorderSizePixel = 0,
+		Size = UDim2.fromScale(1, 1),
+	}, self.staminaBar)
+	new("UICorner", { CornerRadius = UDim.new(0, 6) }, self.staminaFill)
+
 	-- セットプレーの案内
 	self.setpText = text(self.gui, {
 		AnchorPoint = Vector2.new(0.5, 0),
@@ -329,11 +359,40 @@ function Hud:step(match)
 	end
 	for i, p in match.pl do
 		local d = self.dots[i]
+		d.Visible = not p.out
 		d.Position = mp(p.p)
 		d.BackgroundColor3 = p.team == 0 and Color3.fromRGB(35, 110, 215) or Color3.fromRGB(205, 45, 45)
 		d.Size = p == match.ctrl and UDim2.fromOffset(9, 9) or UDim2.fromOffset(6, 6)
 	end
 	self.ballDot.Position = mp(match.ball.p)
+
+	-- 前後半・延長・PK 戦
+	local periodKey
+	if match.mode == "shootout" then
+		periodKey = "hud.period.pk"
+	elseif match.period == "extra" then
+		periodKey = match.bIndex <= 3 and "hud.period.e1" or "hud.period.e2"
+	else
+		periodKey = match.bIndex <= 1 and "hud.period.h1" or "hud.period.h2"
+	end
+	local ptext = t(self.lang, periodKey)
+	if match.shoot ~= nil then
+		ptext ..= "   " .. t(self.lang, "hud.pk", match.shoot.goals[0], match.shoot.goals[1])
+	end
+	self.periodText.Text = ptext
+	self.replayText.Visible = match.mode == "replay"
+	if match.mode == "replay" then
+		self.replayText.Text = "▶ " .. t(self.lang, "hud.replay")
+	end
+
+	-- スタミナ (操作中の選手)
+	local c = match.ctrl
+	if c ~= nil then
+		local f = math.clamp(c.stamina / Config.Stamina.Max, 0, 1)
+		self.staminaFill.Size = UDim2.fromScale(f, 1)
+		self.staminaFill.BackgroundColor3 = c.exhausted and Color3.fromRGB(255, 90, 90)
+			or (f < 0.35 and Color3.fromRGB(255, 190, 60) or Color3.fromRGB(120, 230, 120))
+	end
 end
 
 function Hud:destroy()

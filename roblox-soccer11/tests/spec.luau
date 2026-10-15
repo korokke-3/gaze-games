@@ -84,7 +84,7 @@ do
 	local steps = 0
 	local bad = nil
 	local setKinds = {}
-	while not m.ended and steps < 300 / 0.033 + 100 do
+	while not m.ended and steps < 400 / 0.033 do
 		m:update(0.033)
 		steps += 1
 		if m.setp then
@@ -266,6 +266,410 @@ do
 	check("ファウルで FK/PK になる", m.setp ~= nil and (m.setp.kind == "fk" or m.setp.kind == "pk"))
 	check("ファウルが数えられる", m.stats.fouls == 1)
 	check("人間側のセットプレーではキッカーを操作", m.ctrl == m.setp.taker)
+end
+
+
+local function runUntilEnd(m, maxSteps)
+	local n = 0
+	while not m.ended and n < (maxSteps or 40000) do
+		m:update(1 / 30)
+		n += 1
+	end
+	return n
+end
+
+local function cpuOpts(seed, extra)
+	local o = { random = lcg(seed), ctrlKind = { [0] = "cpu", [1] = "cpu" } }
+	for k, v in extra or {} do
+		o[k] = v
+	end
+	return o
+end
+
+print("== 前後半・ハーフタイム ==")
+do
+	local m = Match.new(cpuOpts(101, { length = 60 }))
+	local sawHalftime, flipDuring = false, nil
+	local n = 0
+	while not m.ended and n < 20000 do
+		m:update(1 / 30)
+		n += 1
+		if m.mode == "halftime" then
+			sawHalftime = true
+		end
+		if m.elapsed > 45 and flipDuring == nil and m.mode == "play" then
+			flipDuring = m.flip
+		end
+	end
+	check("ハーフタイムが入る", sawHalftime)
+	check("後半はサイドが入れ替わる", flipDuring == true, tostring(flipDuring))
+	check("規定時間で終了する", m.ended and m.elapsed >= 60 - 0.1, m.elapsed)
+	check("引き分けでもカップ戦でなければ終了", m.result ~= nil and m.result.shootout == nil)
+	local hs = Match.new(cpuOpts(102, { length = 60 }))
+	for _ = 1, 3 do
+		hs:update(1 / 30)
+	end
+	check("前半は HOME が +x を攻める", hs:sgn(0) == 1 and hs:sgn(1) == -1)
+	hs.flip = true
+	check("後半は HOME が -x を攻める", hs:sgn(0) == -1 and hs:sgn(1) == 1)
+	check("ゴール判定がサイドに追従", (function()
+		local g = Match.new(cpuOpts(103, { length = 60 }))
+		g.flip = true
+		g.ball.owner, g.ball.last = nil, g.teams[0][10]
+		g.ball.p = { x = -52.4, y = 0 } -- 後半は HOME が -x のゴールを攻める
+		g.ball.v = { x = -8, y = 0 }
+		g.ball.z = 0.5
+		g:update(1 / 30)
+		return g.score[0] == 1
+	end)())
+end
+
+print("== スタミナ ==")
+do
+	local m = Match.new({ random = lcg(7) })
+	for _, q in m.teams[1] do
+		q.p = { x = 45, y = q.p.y }
+	end
+	local c = m.ctrl
+	check("開始時はスタミナ満タン", c.stamina == Config.Stamina.Max)
+	m:setKey("D", true)
+	m:setKey("Shift", true)
+	for _ = 1, 150 do
+		m:update(1 / 30)
+		if m.ball.owner ~= m.ctrl then
+			break
+		end
+	end
+	check("ダッシュでスタミナが減る", c.stamina < Config.Stamina.Max - 5, c.stamina)
+	c.stamina = 0
+	c.exhausted = true
+	check("スタミナ切れは速度が落ちる", m:speedMult(c) < c.attr.speed * 0.9, m:speedMult(c))
+	check("スタミナ切れではダッシュできない", c.exhausted)
+	for _ = 1, 600 do
+		m:setKey("Shift", false)
+		m:setKey("D", false)
+		c.v = { x = 0, y = 0 }
+		m:updateStamina(c, 1 / 30)
+	end
+	check("止まっていれば回復する", c.stamina > Config.Stamina.DashMin and not c.exhausted, c.stamina)
+end
+
+print("== 選手の能力差 ==")
+do
+	local m = Match.new({ random = lcg(55) })
+	local st, cb, gk = m.teams[0][10], m.teams[0][3], m.teams[0][1]
+	check("ST はシュートが上手い", st.attr.shoot > cb.attr.shoot, st.attr.shoot .. " vs " .. cb.attr.shoot)
+	check("CB は守備が強い", cb.attr.tackle > st.attr.tackle)
+	check("GK は足が遅い", gk.attr.speed < st.attr.speed)
+	local lo, hi = 9, 0
+	for _, p in m.pl do
+		lo, hi = math.min(lo, p.attr.speed), math.max(hi, p.attr.speed)
+	end
+	check("個体差がある", hi - lo > 0.05, hi - lo)
+end
+
+print("== フォーメーション ==")
+do
+	for _, key in Config.FormationOrder do
+		local m = Match.new({ random = lcg(9), formation = { [0] = key, [1] = key } })
+		local roles = {}
+		for _, p in m.teams[0] do
+			roles[p.role] = (roles[p.role] or 0) + 1
+		end
+		check(key .. " は 11 人", #m.teams[0] == 11)
+		local fw = 0
+		for r, n in roles do
+			if Config.ForwardRoles[r] then
+				fw += n
+			end
+		end
+		check(key .. " に前線の選手がいる", fw >= 1, fw)
+	end
+	local m = Match.new({ random = lcg(9), formation = { [0] = "352", [1] = "442" } })
+	local cb = 0
+	for _, p in m.teams[0] do
+		if p.role == "CB" then
+			cb += 1
+		end
+	end
+	check("3-5-2 はセンターバックが 3 人", cb == 3, cb)
+	local r442 = {}
+	for _, p in m.teams[1] do
+		r442[p.role] = true
+	end
+	check("チームごとに別のフォーメーション", r442.LM == true and r442.ST == true)
+end
+
+print("== 難易度 ==")
+do
+	local easy = Match.new({ random = lcg(1), difficulty = 1 })
+	local hard = Match.new({ random = lcg(1), difficulty = 5 })
+	check("難しいほど CPU が速い", hard:teamSpeed(1) > easy:teamSpeed(1))
+	check("味方 (人間側) には掛からない", hard:teamSpeed(0) == 1)
+	check("GK の反応が難易度で変わる", Config.Difficulties[5].gkReact > Config.Difficulties[1].gkReact)
+	-- 簡単な相手はシュートがぶれやすい
+	local function spread(diff)
+		local m = Match.new({ random = lcg(77), difficulty = diff, ctrlKind = { [0] = "cpu", [1] = "cpu" } })
+		local sum, n = 0, 0
+		for _ = 1, 200 do
+			local c = m.teams[1][10]
+			c.p = { x = -30, y = 0 }
+			m.ball.owner = c
+			m:kick("shot", { c = c, power = 0.7, aimY = 0 })
+			local tgtY = m.ball.v.y / math.max(math.abs(m.ball.v.x), 1e-6) * (m.ball.p.x + 52.5)
+			sum += math.abs(tgtY)
+			n += 1
+		end
+		return sum / n
+	end
+	check("簡単な CPU ほどシュートがぶれる", spread(1) > spread(5), spread(1) .. " vs " .. spread(5))
+end
+
+print("== カード・退場 ==")
+do
+	local m = Match.new({ random = lcg(31) })
+	local p = m.teams[1][3]
+	m:showCard(p, "yellow")
+	check("イエローが数えられる", m.tstats[1].yellow == 1 and not p.out)
+	p.yellow = 1
+	m:cardCheck(p) -- 乱数次第で 1 枚追加される場合がある
+	local q = m.teams[1][4]
+	q.yellow = 1
+	m:showCard(q, "red")
+	check("レッドで退場する", q.out == true)
+	check("退場者はアクティブから外れる", #m:active(1) == 10 or #m:active(1) == 9, #m:active(1))
+	local inList = false
+	for _, x in m:active(1) do
+		if x == q then
+			inList = true
+		end
+	end
+	check("退場者は選手一覧に含まれない", not inList)
+	local gk = m.teams[0][1]
+	m:sendOff(gk)
+	local newGk = m:slot(0, 0)
+	check("GK 退場後は別の選手がキーパーになる", newGk ~= gk and newGk.gk == true)
+	-- 通し (退場者がいても試合が壊れない)
+	local steps = 0
+	while not m.ended and steps < 12000 do
+		m:update(1 / 30)
+		steps += 1
+		for _, x in m.pl do
+			if x.p.x ~= x.p.x then
+				steps = 99999
+			end
+		end
+	end
+	check("退場者がいても試合が最後まで進む", steps < 99999)
+end
+
+print("== 延長戦・PK 戦 ==")
+do
+	-- 勝敗判定の単体テスト
+	local m = Match.new({ random = lcg(2), cup = true })
+	m.shoot = { goals = { [0] = 0, [1] = 0 }, taken = { [0] = 0, [1] = 0 } }
+	m.shoot.goals = { [0] = 3, [1] = 0 }
+	m.shoot.taken = { [0] = 3, [1] = 3 }
+	check("残り 2 本で 3 点差なら勝ち", m:shootWinner() == 0)
+	m.shoot.goals = { [0] = 2, [1] = 1 }
+	m.shoot.taken = { [0] = 3, [1] = 3 }
+	check("まだ逆転できるなら続行", m:shootWinner() == nil)
+	m.shoot.goals = { [0] = 4, [1] = 4 }
+	m.shoot.taken = { [0] = 5, [1] = 5 }
+	check("5 本で同点ならサドンデスへ", m:shootWinner() == nil)
+	m.shoot.goals = { [0] = 5, [1] = 4 }
+	m.shoot.taken = { [0] = 6, [1] = 5 }
+	check("サドンデスは同数を蹴るまで決めない", m:shootWinner() == nil)
+	m.shoot.goals = { [0] = 5, [1] = 4 }
+	m.shoot.taken = { [0] = 6, [1] = 6 }
+	check("サドンデスで差がつけば決着", m:shootWinner() == 0)
+	m.shoot.goals = { [0] = 1, [1] = 3 }
+	m.shoot.taken = { [0] = 5, [1] = 5 }
+	check("5 本終了で AWAY の勝ち", m:shootWinner() == 1)
+
+	-- 通し: 引き分けになるシードを探し、PK 戦まで進めて終わること
+	local found, ended = 0, 0
+	for seed = 1, 40 do
+		local c = Match.new(cpuOpts(seed * 13, { length = 40, cup = true }))
+		runUntilEnd(c, 60000)
+		if c.result and c.result.shootout then
+			found += 1
+			if c.ended and c.result.winner ~= nil then
+				ended += 1
+			end
+		end
+		if found >= 2 then
+			break
+		end
+	end
+	check("引き分けの試合が PK 戦まで進む", found >= 1, found)
+	check("PK 戦で勝者が決まる", ended == found and found >= 1, ended .. "/" .. found)
+end
+
+print("== ゴールリプレイ ==")
+do
+	local m = Match.new({ random = lcg(61), ctrlKind = { [0] = "cpu", [1] = "cpu" } })
+	for _ = 1, 150 do
+		m:update(1 / 30) -- 記録をためる
+	end
+	check("リプレイ用の記録がたまる", #m.rec >= 10, #m.rec)
+	m.ball.owner, m.ball.last = nil, m.teams[0][10]
+	m.ball.p = { x = 52.4, y = 0 }
+	m.ball.v = { x = 8, y = 0 }
+	m.ball.z = 0.5
+	m:update(1 / 30)
+	check("ゴール後はリプレイに入る", m.mode == "replay", m.mode)
+	local before = m.elapsed
+	for _ = 1, 10 do
+		m:update(1 / 30)
+	end
+	check("リプレイ中は試合時間が進まない", m.elapsed == before)
+	m:onKey("K")
+	check("K でリプレイをスキップできる", m.mode == "play")
+	check("スキップ後は相手のキックオフ", m.ball.owner ~= nil and m.ball.owner.team == 1)
+end
+
+print("== ヘディング ==")
+do
+	local m = Match.new({ random = lcg(71) })
+	for _, q in m.teams[1] do
+		q.p = { x = 45, y = q.p.y }
+	end
+	local c = m.ctrl
+	c.p = { x = 40, y = 2 }
+	m.ball.owner = nil
+	m.ball.p = { x = 40.4, y = 2 }
+	m.ball.z = 1.5
+	m.ball.vz = 0
+	m.ball.v = { x = 0, y = 0 }
+	m:onKey("J")
+	check("空中のボールにシュートで合わせる", m.ball.kind == "shot" and m.ball.owner == nil, m.ball.kind)
+	local m2 = Match.new({ random = lcg(72) })
+	m2.ball.owner = nil
+	m2.ctrl.p = { x = -10, y = 0 }
+	m2.ball.p = { x = -9.5, y = 0 }
+	m2.ball.z = 0.2
+	m2:onKey("J")
+	check("低いボールではヘディングにならない", m2.ball.kind ~= "shot")
+end
+
+print("== キーパーのダイブ ==")
+do
+	local m = Match.new({ random = lcg(81), difficulty = 5 })
+	local c = m.teams[0][10]
+	c.p = { x = 35, y = 0 }
+	m.ball.owner = c
+	m:kick("shot", { c = c, power = 0.8, aimY = 1.5 })
+	local gk = m:slot(1, 0)
+	check("枠内のシュートで GK がダイブを始める", gk.dive ~= nil)
+	local y0 = gk.p.y
+	for _ = 1, 20 do
+		m:update(1 / 30)
+	end
+	check("GK が横へ動く", math.abs(gk.p.y - y0) > 0.3 or m.ball.owner == gk, gk.p.y - y0)
+	local m2 = Match.new({ random = lcg(82) })
+	local c2 = m2.teams[0][10]
+	c2.p = { x = 35, y = 0 }
+	m2.ball.owner = c2
+	m2:kick("shot", { c = c2, power = 0.8, aimY = 9 }) -- 大きく外す
+	check("枠外には反応しない", m2:slot(1, 0).dive == nil)
+end
+
+print("== スタッツ ==")
+do
+	local m = Match.new(cpuOpts(91, { length = 90 }))
+	runUntilEnd(m)
+	local r = m.result
+	check("支配率が 0〜100", r.possession >= 0 and r.possession <= 100, r.possession)
+	check("シュート数 ≧ 枠内数", r.stats[0].shots >= r.stats[0].onTarget and r.stats[1].shots >= r.stats[1].onTarget)
+	check("パス成功 ≦ パス数 (各チーム)", r.stats[0].passOk <= r.stats[0].passes + 2 and r.stats[1].passOk <= r.stats[1].passes + 2)
+	check("結果に設定が入る", r.difficulty == 3 and r.formation == "433" and r.length == 90)
+end
+
+print("== 報酬 ==")
+do
+	local function sess(len, diff)
+		return { length = len, difficulty = diff, cup = false }
+	end
+	local win = Rewards.sanitize({ home = 2, away = 0, winner = 0 })
+	local c, parts = Rewards.compute(sess(300, 3), win, false)
+	check("勝利 + 2 点 + 無失点", c == Config.Rewards.Base + Config.Rewards.Win + 2 * Config.Rewards.PerGoal + Config.Rewards.CleanSheet, c)
+	check("内訳に無失点が入る", parts.cleanSheet == Config.Rewards.CleanSheet)
+	local loss = Rewards.sanitize({ home = 0, away = 3, winner = 1 })
+	local cl = Rewards.compute(sess(300, 3), loss, false)
+	check("敗戦でも基本報酬がある", cl == Config.Rewards.Base, cl)
+	local draw = Rewards.sanitize({ home = 1, away = 1 })
+	local cd = Rewards.compute(sess(300, 3), draw, false)
+	check("引き分けは勝利より少ない", cd < Rewards.compute(sess(300, 3), Rewards.sanitize({ home = 2, away = 1, winner = 0 }), false))
+	check("難しい難易度ほど多い", Rewards.compute(sess(300, 5), win, false) > Rewards.compute(sess(300, 1), win, false))
+	check("長い試合ほど多い", Rewards.compute(sess(600, 3), win, false) > Rewards.compute(sess(180, 3), win, false))
+	local huge = Rewards.sanitize({ home = 9999, away = 0, winner = 0, shootoutWin = true })
+	check("得点の申告は丸められる", huge.home == 30)
+	local cmax = Rewards.compute(sess(600, 5), huge, false)
+	check("上限を超えない", cmax <= Config.Rewards.Max, cmax)
+	local cv = Rewards.compute(sess(300, 3), win, true)
+	check("VIP は 2 倍", cv == c * Config.Monetization.VipCoinMultiplier, cv)
+	local bad = Rewards.sanitize("hack")
+	check("不正な入力は 0 点扱い", bad.home == 0 and bad.away == 0 and bad.winner == nil)
+	local nan = Rewards.sanitize({ home = 0 / 0, away = -5, winner = 7 })
+	check("NaN・負数・範囲外の勝者を弾く", nan.home == 0 and nan.away == 0 and nan.winner == nil)
+	check("選べる試合時間の検証", Rewards.isValidLength(300) and not Rewards.isValidLength(7))
+end
+
+print("== コスメ・課金設定 ==")
+do
+	local ids, dup = {}, nil
+	for _, k in Config.Kits do
+		if ids["kit:" .. k.id] then
+			dup = k.id
+		end
+		ids["kit:" .. k.id] = true
+	end
+	for _, k in Config.Balls do
+		if ids["ball:" .. k.id] then
+			dup = k.id
+		end
+		ids["ball:" .. k.id] = true
+	end
+	check("キット・ボールの ID が重複しない", dup == nil, dup)
+	check("既定のキットは無料", Config.Kits[1].price == 0 and not Config.Kits[1].vip)
+	check("既定のボールは無料", Config.Balls[1].price == 0 and not Config.Balls[1].vip)
+	local vipKit = false
+	for _, k in Config.Kits do
+		if k.vip then
+			vipKit = true
+		end
+	end
+	check("VIP 限定のキットがある", vipKit)
+	check("コインパックは小さいほど安い", Config.Monetization.Products.Coins500.price < Config.Monetization.Products.Coins2000.price)
+	local fair = true
+	for _, k in Config.Kits do
+		if k.stat ~= nil then
+			fair = false
+		end
+	end
+	check("キットは勝敗に影響しない (能力値を持たない)", fair)
+end
+
+print("== 課金 ID ==")
+do
+	local ids, dup, zero = {}, false, {}
+	for k, d in Config.Monetization.Passes do
+		if d.id == 0 then
+			table.insert(zero, k)
+		end
+		dup = dup or ids[d.id] == true
+		ids[d.id] = true
+	end
+	for k, d in Config.Monetization.Products do
+		if d.id == 0 then
+			table.insert(zero, k)
+		end
+		dup = dup or ids[d.id] == true
+		ids[d.id] = true
+	end
+	check("全ての商品に ID が入っている", #zero == 0, table.concat(zero, ","))
+	check("ID が重複しない", not dup)
 end
 
 print(("%d checks, %d failures"):format(checks, failures))

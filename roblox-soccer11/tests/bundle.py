@@ -23,6 +23,7 @@ parts = ["--!nocheck"]
 for name, relative in (
     ("Config", "src/shared/Config.luau"),
     ("Locale", "src/shared/Locale.luau"),
+    ("Rewards", "src/shared/Rewards.luau"),
     ("Match", "src/shared/Match.luau"),
 ):
     parts.append(f"{name} = (function()\n{module_body(relative)}\nend)()")
