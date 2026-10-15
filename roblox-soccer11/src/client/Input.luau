@@ -7,13 +7,14 @@
 	  Input.localSink(match, seatId)  ソロ: 手元の Match へ直接
 	  Input.netSink(send)             オンライン: サーバーへ (ボタンの変化は即時、移動・狙いは 20 回/秒)
 
-	PC はマウス中心 (マウスで指した所が狙い。指した味方へパス、スペースならそこへ):
+	キーとボタンは Bindings (操作設定) から引く。既定 (マウス中心) は:
 	  WASD = 移動 / マウス = 狙う地点 / ホイール = ズーム / Shift = R2 (ダッシュ・強いキック)
 	  左クリック = × (パス / プレッシャー)  右クリック = □ (シュート / ショルダーチャージ)
 	  Space or ホイールクリック = △ (スルー / GK 飛び出し)  E = ○ (浮き球・クロス / スライディング)
 	  Q = L1 (修飾 / マウスに近い味方へ切替)  R = R1 (修飾 / 2 人目のプレス)  F = L2 (マッチアップ)
 	  矢印 = 右スティック (フェイント / カーブ)  Z・C = 攻守レベル  P = 一時停止  H = 操作表示
 	  キーボードだけでも遊べる: K = ×, I = △, L = ○, J = □ (狙いは WASD)
+	マウスで指した所が狙い (指した味方へパス、スペースならそこへ)。
 ]]
 
 local UserInputService = game:GetService("UserInputService")
@@ -26,44 +27,20 @@ local Snapshot = require(Shared:WaitForChild("Snapshot"))
 
 local S = Config.View.Studs
 
-local KEY_BUTTON = {
-	Space = "through",
-	E = "lofted",
-	R = "r1",
-	K = "pass",
-	I = "through",
-	L = "lofted",
-	J = "shoot",
-	LeftShift = "dash",
-	RightShift = "dash",
-	Q = "l1",
-	F = "l2",
-	-- ゲームパッド
-	ButtonA = "pass",
-	ButtonY = "through",
-	ButtonB = "lofted",
-	ButtonX = "shoot",
-	ButtonR2 = "dash",
-	ButtonL1 = "l1",
-	ButtonR1 = "r1",
-	ButtonL2 = "l2",
-}
-local KEY_FLICK = {
-	Up = { 0, -1 },
-	Down = { 0, 1 },
-	Left = { -1, 0 },
-	Right = { 1, 0 },
-}
-local KEY_CMD = {
-	Z = "levelDown",
-	C = "levelUp",
-	DPadDown = "levelDown",
-	DPadUp = "levelUp",
-	P = "pause",
-	ButtonStart = "pause",
-}
-local MOVE_KEYS = { W = { 0, -1 }, S = { 0, 1 }, A = { -1, 0 }, D = { 1, 0 } }
+local Bindings = require(Shared:WaitForChild("Bindings"))
 
+local FLICKS = {
+	flickUp = { 0, -1 },
+	flickDown = { 0, 1 },
+	flickLeft = { -1, 0 },
+	flickRight = { 1, 0 },
+}
+local MOVES = {
+	moveUp = { 0, -1 },
+	moveDown = { 0, 1 },
+	moveLeft = { -1, 0 },
+	moveRight = { 1, 0 },
+}
 local Input = {}
 Input.__index = Input
 
@@ -181,6 +158,7 @@ end
 	  onDevice: (device: "keyboard" | "gamepad" | "touch") -> ()
 	  onZoom: (delta: number) -> ()  マウスホイール
 	  mouseAim: boolean  PC でマウスを狙いに使う (既定 true)
+	  bindings: 操作の割り当て (Bindings。省略時は既定)
 	  allowPause: boolean
 	}
 ]]
@@ -190,7 +168,8 @@ function Input.new(opts)
 	self.sink = opts.sink
 	self.lang = opts.lang
 	self.conns = {}
-	self.keysDown = {}
+	self.actionDown = {} -- 移動の操作 -> 押しているか
+	self.lookup = Bindings.lookup(opts.bindings or Bindings.default())
 	self.buttons = {} -- 論理ボタン -> 押しているソースの数
 	self.stick = { x = 0, y = 0 } -- ゲームパッドの左スティック
 	self.touchMove = { x = 0, y = 0 }
@@ -250,6 +229,18 @@ function Input:_buttonUp(b)
 	end
 end
 
+--- マウスボタンの名前 ("MouseButton1" 等)。マウスでなければ nil。
+local function mouseName(t)
+	if t == Enum.UserInputType.MouseButton1 then
+		return "MouseButton1"
+	elseif t == Enum.UserInputType.MouseButton2 then
+		return "MouseButton2"
+	elseif t == Enum.UserInputType.MouseButton3 then
+		return "MouseButton3"
+	end
+	return nil
+end
+
 function Input:_began(input, processed)
 	local t = input.UserInputType
 	if t == Enum.UserInputType.Keyboard then
@@ -257,59 +248,33 @@ function Input:_began(input, processed)
 			return
 		end
 		self:_setDevice("keyboard")
-		local name = input.KeyCode.Name
-		if name == "H" then
-			if self.opts.onToggleHelp then
-				self.opts.onToggleHelp()
-			end
-			return
-		end
-		self.keysDown[name] = true
-		self:_key(name, true)
-	elseif t == Enum.UserInputType.MouseButton1 or t == Enum.UserInputType.MouseButton2 or t == Enum.UserInputType.MouseButton3 then
+		self:_action(self.lookup.kb[input.KeyCode.Name], true)
+	elseif mouseName(t) ~= nil then
 		if processed then
 			return
 		end
 		self:_setDevice("keyboard")
 		self.mouseHeld = true
 		self.lastMouseMove = self.clock
-		self:_buttonDown(self:_mouseButton(t))
+		self:_action(self.lookup.kb[mouseName(t)], true)
 	elseif t == Enum.UserInputType.Gamepad1 then
 		self:_setDevice("gamepad")
-		local name = input.KeyCode.Name
-		if name == "ButtonSelect" then
-			if self.opts.onToggleHelp then
-				self.opts.onToggleHelp()
-			end
-			return
-		end
-		self:_key(name, true)
+		self:_action(self.lookup.pad[input.KeyCode.Name], true)
 	end
 end
 
 function Input:_ended(input)
 	local t = input.UserInputType
 	if t == Enum.UserInputType.Keyboard then
-		local name = input.KeyCode.Name
-		self.keysDown[name] = nil
-		self:_key(name, false)
-	elseif t == Enum.UserInputType.MouseButton1 or t == Enum.UserInputType.MouseButton2 or t == Enum.UserInputType.MouseButton3 then
+		self:_action(self.lookup.kb[input.KeyCode.Name], false)
+	elseif mouseName(t) ~= nil then
 		self.mouseHeld = false
-		self:_buttonUp(self:_mouseButton(t))
+		self:_action(self.lookup.kb[mouseName(t)], false)
 	elseif t == Enum.UserInputType.Gamepad1 then
-		self:_key(input.KeyCode.Name, false)
+		self:_action(self.lookup.pad[input.KeyCode.Name], false)
 	elseif t == Enum.UserInputType.Touch and self.touch then
 		self:_touchEnded(input)
 	end
-end
-
-function Input:_mouseButton(t)
-	if t == Enum.UserInputType.MouseButton1 then
-		return "pass"
-	elseif t == Enum.UserInputType.MouseButton2 then
-		return "shoot"
-	end
-	return "through"
 end
 
 function Input:_changed(input, processed)
@@ -341,26 +306,39 @@ function Input:_changed(input, processed)
 	end
 end
 
-function Input:_key(name, down)
-	local b = KEY_BUTTON[name]
-	if b ~= nil then
+--- 割り当てられた操作を実行する。
+function Input:_action(action, down)
+	if action == nil then
+		return
+	end
+	if Bindings.BUTTON_ACTIONS[action] then
 		if down then
-			self:_buttonDown(b)
+			self:_buttonDown(action)
 		else
-			self:_buttonUp(b)
+			self:_buttonUp(action)
 		end
 		return
 	end
-	if down then
-		local f = KEY_FLICK[name]
-		if f ~= nil then
-			self.sink:flick(f[1], f[2])
-			return
+	if MOVES[action] then
+		self.actionDown[action] = down or nil
+		return
+	end
+	if not down then
+		return
+	end
+	local f = FLICKS[action]
+	if f ~= nil then
+		self.sink:flick(f[1], f[2])
+	elseif action == "help" then
+		if self.opts.onToggleHelp then
+			self.opts.onToggleHelp()
 		end
-		local c = KEY_CMD[name]
-		if c ~= nil and (c ~= "pause" or self.opts.allowPause) then
-			self.sink:command(c)
+	elseif action == "pause" then
+		if self.opts.allowPause then
+			self.sink:command("pause")
 		end
+	elseif action == "levelUp" or action == "levelDown" then
+		self.sink:command(action)
 	end
 end
 
@@ -369,8 +347,8 @@ function Input:update(dt)
 	self.clock += dt
 	-- 移動: キーボード (8 方向) とスティック (アナログ) の合成
 	local mx, my = 0, 0
-	for k, v in MOVE_KEYS do
-		if self.keysDown[k] then
+	for a, v in MOVES do
+		if self.actionDown[a] then
 			mx += v[1]
 			my += v[2]
 		end

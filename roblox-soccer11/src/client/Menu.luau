@@ -5,10 +5,12 @@
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared:WaitForChild("Config"))
 local Locale = require(Shared:WaitForChild("Locale"))
+local Bindings = require(Shared:WaitForChild("Bindings"))
 
 local PANEL = Color3.fromRGB(24, 30, 28)
 local ROW = Color3.fromRGB(38, 46, 42)
@@ -204,7 +206,7 @@ function Menu.new(gui, lang, callbacks)
 		BackgroundTransparency = 1,
 		AnchorPoint = Vector2.new(0.5, 0),
 		Position = UDim2.new(0.5, 0, 0, 58),
-		Size = UDim2.fromOffset(480, 40),
+		Size = UDim2.fromOffset(640, 40),
 		ZIndex = 31,
 	}, self.root)
 	new("UIListLayout", {
@@ -212,7 +214,7 @@ function Menu.new(gui, lang, callbacks)
 		Padding = UDim.new(0, 10),
 		HorizontalAlignment = Enum.HorizontalAlignment.Center,
 	}, tabBar)
-	for _, id in { "play", "online", "shop" } do
+	for _, id in { "play", "online", "controls", "shop" } do
 		local b = button(tabBar, Locale.t(lang, "menu." .. id), GREY, { Size = UDim2.fromOffset(150, 38), ZIndex = 32 })
 		b.Activated:Connect(function()
 			self:setPage(id)
@@ -254,6 +256,14 @@ function Menu.new(gui, lang, callbacks)
 		ZIndex = 40,
 	})
 	self.toastToken = 0
+
+	-- 操作設定: キーの受付
+	self.bindings = Bindings.default()
+	self.ctrlDevice = "kb"
+	self.capture = nil
+	UserInputService.InputBegan:Connect(function(input)
+		self:_captureInput(input)
+	end)
 	return self
 end
 
@@ -309,6 +319,8 @@ function Menu:_render()
 		self:_renderPlay()
 	elseif self.page == "online" then
 		self:_renderOnline()
+	elseif self.page == "controls" then
+		self:_renderControls()
 	else
 		self:_renderShop()
 	end
@@ -493,6 +505,162 @@ function Menu:setRoom(room)
 	self.room = room
 	if self.root.Visible and self.page == "online" then
 		self:_render()
+	end
+end
+
+-- ================================================================ 操作設定 (キー割り当て)
+function Menu:setBindings(b)
+	self.bindings = b
+	if self.root.Visible and self.page == "controls" then
+		self:_render()
+	end
+end
+
+function Menu:_captureInput(input)
+	local cap = self.capture
+	if cap == nil then
+		return
+	end
+	local t = input.UserInputType
+	local key = nil
+	if cap.device == "kb" then
+		if t == Enum.UserInputType.Keyboard then
+			key = input.KeyCode.Name
+		elseif t == Enum.UserInputType.MouseButton1 then
+			key = "MouseButton1"
+		elseif t == Enum.UserInputType.MouseButton2 then
+			key = "MouseButton2"
+		elseif t == Enum.UserInputType.MouseButton3 then
+			key = "MouseButton3"
+		end
+	elseif t == Enum.UserInputType.Gamepad1 then
+		key = input.KeyCode.Name
+	elseif t == Enum.UserInputType.Keyboard and input.KeyCode.Name == "Escape" then
+		key = "Escape"
+	end
+	if key == nil then
+		return
+	end
+	self.capture = nil
+	if key == "Escape" then
+		self:_render()
+		return
+	end
+	if key == "Backspace" then
+		self.cb.onBind(cap.device, cap.action, cap.slot, nil)
+		return
+	end
+	local allowed = cap.device == "pad" and Bindings.PAD_ALLOWED or Bindings.KB_ALLOWED
+	if not allowed[key] then
+		self:toast(Locale.t(self.lang, "controls.notallowed", Bindings.display(key)))
+		self:_render()
+		return
+	end
+	self.cb.onBind(cap.device, cap.action, cap.slot, key)
+end
+
+function Menu:_renderControls()
+	local t = function(k, ...)
+		return Locale.t(self.lang, k, ...)
+	end
+	local b = self.bindings
+	label(self.scroll, t("controls.note"), {
+		Size = UDim2.new(1, 0, 0, 36),
+		TextSize = 14,
+		TextWrapped = true,
+		TextColor3 = Color3.fromRGB(180, 200, 190),
+		LayoutOrder = nextOrder(),
+		ZIndex = 32,
+	})
+	-- 機器の切り替え / プリセット
+	local bar = new("Frame", { BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 38), LayoutOrder = nextOrder(), ZIndex = 32 }, self.scroll)
+	new("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 8) }, bar)
+	for _, dev in { "kb", "pad" } do
+		local btn = button(bar, t("controls.device." .. dev), self.ctrlDevice == dev and GREEN or GREY, {
+			Size = UDim2.new(0.5, -4, 1, 0),
+			ZIndex = 33,
+		})
+		btn.Activated:Connect(function()
+			self.ctrlDevice = dev
+			self.capture = nil
+			self:_render()
+		end)
+	end
+	local bar2 = new("Frame", { BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 38), LayoutOrder = nextOrder(), ZIndex = 32 }, self.scroll)
+	new("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 8) }, bar2)
+	for _, preset in { "mouse", "keys" } do
+		local btn = button(bar2, t("controls.preset." .. preset), b.preset == preset and GREEN or GREY, {
+			Size = UDim2.new(1 / 3, -6, 1, 0),
+			TextSize = 14,
+			ZIndex = 33,
+		})
+		btn.Activated:Connect(function()
+			self.capture = nil
+			self.cb.onPreset(preset)
+		end)
+	end
+	local reset = button(bar2, t("controls.reset"), Color3.fromRGB(150, 60, 60), {
+		Size = UDim2.new(1 / 3, -6, 1, 0),
+		TextSize = 14,
+		ZIndex = 33,
+	})
+	reset.Activated:Connect(function()
+		self.capture = nil
+		self.cb.onPreset("mouse")
+	end)
+	if self.ctrlDevice == "pad" then
+		label(self.scroll, t("controls.padonly"), {
+			Size = UDim2.new(1, 0, 0, 22),
+			TextSize = 14,
+			TextColor3 = Color3.fromRGB(255, 230, 150),
+			LayoutOrder = nextOrder(),
+			ZIndex = 32,
+		})
+	end
+	local slots = self.ctrlDevice == "pad" and Bindings.MAX_PAD or Bindings.MAX_KB
+	local map = self.ctrlDevice == "pad" and b.pad or b.kb
+	local lastGroup = nil
+	for _, a in Bindings.ACTIONS do
+		if self.ctrlDevice == "pad" and not Bindings.PAD_ACTIONS[a.id] then
+			continue
+		end
+		if a.group ~= lastGroup then
+			lastGroup = a.group
+			self:_header(t("controls.group." .. a.group))
+		end
+		local row = self:_row(42)
+		label(row, t("action." .. a.id), {
+			Position = UDim2.fromOffset(12, 0),
+			Size = UDim2.new(0.5, -12, 1, 0),
+			TextSize = 15,
+			TextWrapped = true,
+			ZIndex = 33,
+		})
+		local list = map[a.id] or {}
+		for slot = 1, slots do
+			local capturing = self.capture ~= nil and self.capture.action == a.id and self.capture.slot == slot and self.capture.device == self.ctrlDevice
+			local key = list[slot]
+			local text = capturing and t("controls.press") or Bindings.display(key)
+			local w = 0.5 / slots
+			local btn = button(row, text, capturing and GOLD or Color3.fromRGB(235, 235, 235), {
+				AnchorPoint = Vector2.new(0, 0.5),
+				Position = UDim2.new(0.5 + w * (slot - 1), 4, 0.5, 0),
+				Size = UDim2.new(w, -8, 0, 32),
+				TextColor3 = capturing and Color3.new(1, 1, 1) or Color3.fromRGB(20, 20, 20),
+				TextSize = 15,
+				ZIndex = 33,
+			})
+			-- 2 つ目の枠は、1 つ目が空なら押せない (詰めて保存するため)
+			if slot > #list + 1 then
+				btn.AutoButtonColor = false
+				btn.BackgroundTransparency = 0.6
+			else
+				btn.Activated:Connect(function()
+					self.capture = { device = self.ctrlDevice, action = a.id, slot = slot }
+					self:_render()
+				end)
+			end
+		end
 	end
 end
 

@@ -137,6 +137,17 @@ NetFire("RequestState", p1)
 local s3 = lastState(p1)
 Check("設定が保存され、許可外のキー・型は捨てられる", s3.settings.difficulty == 5 and s3.settings.evil == nil and s3.settings.camera == nil, s3.settings.evil)
 
+-- 操作の割り当て
+Check("状態に既定の割り当てが入る", lastState(p1).bindings ~= nil and lastState(p1).bindings.kb.pass[1] == "MouseButton1")
+NetFire("SaveBindings", p1, { preset = "custom", kb = { pass = { "G", "Slash", "G", "H" }, evil = { "X" } }, pad = { pass = { "ButtonB" } } })
+NetFire("RequestState", p1)
+local bnd = lastState(p1).bindings
+Check("割り当てが保存され、禁止キー・重複・不明な操作は捨てられる", bnd.kb.pass[1] == "G" and bnd.kb.pass[2] == "H" and #bnd.kb.pass == 2 and bnd.kb.evil == nil and bnd.pad.pass[1] == "ButtonB")
+NetFire("SaveBindings", p1, "garbage")
+NetFire("RequestState", p1)
+Check("壊れたデータは既定に戻す", lastState(p1).bindings.kb.pass[1] == "MouseButton1")
+NetFire("SaveBindings", p1, { kb = { pass = { "G" } } })
+
 -- 退出で保存・ロック解放 → 再参加
 local coinsNow = lastState(p1).coins
 Fire("PlayerRemoving", p1)
@@ -150,6 +161,7 @@ end
 local p1b = newPlayer(1)
 join(p1b)
 Check("再参加で状態が引き継がれる", lastState(p1b).coins == coinsNow and lastState(p1b).owned.kit.crimson == true)
+Check("割り当ても引き継がれる", lastState(p1b).bindings.kb.pass[1] == "G")
 
 -- セッションロック: 別サーバーが保持している間は上書きしない
 DataStoreMemory["u_2"] = { lock = { jobId = "other-server", time = os.time() }, data = { coins = 777, kits = { classic = true }, balls = { classic = true }, equipped = { kit = "classic", ball = "classic" }, stats = {}, settings = {}, receipts = {} } }

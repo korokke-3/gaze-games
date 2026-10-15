@@ -914,6 +914,61 @@ do
 	check("地点の往復 (10cm 単位)", inp and inp.point and math.abs(inp.point.x + 31.4) < 0.06 and math.abs(inp.point.y - 12.6) < 0.06 and inp.buttons.through)
 end
 
+print("== 操作の割り当て ==")
+do
+	local d = Bindings.default()
+	check("既定はマウス中心", d.preset == "mouse" and d.kb.pass[1] == "MouseButton1" and d.kb.shoot[1] == "MouseButton2")
+	check("全ての操作に既定のキーがある", (function()
+		for _, a in Bindings.ACTIONS do
+			if #d.kb[a.id] == 0 then
+				return false
+			end
+		end
+		return true
+	end)())
+	-- 各プリセットでキーが重ならない
+	for name in Bindings.PRESETS do
+		local b = Bindings.fromPreset(name)
+		local seen, dup = {}, nil
+		for a, list in b.kb do
+			for _, k in list do
+				if seen[k] then
+					dup = k .. " (" .. seen[k] .. " / " .. a .. ")"
+				end
+				seen[k] = a
+			end
+		end
+		check(name .. " プリセットでキーが重ならない", dup == nil, dup)
+	end
+	local k = Bindings.fromPreset("keys")
+	check("キーボードのみ: K=パス I=スルー L=浮き球 J=シュート", k.kb.pass[1] == "K" and k.kb.through[1] == "I" and k.kb.lofted[1] == "L" and k.kb.shoot[1] == "J")
+	-- 変更: 他の操作に使われていたキーは、そちらから外す
+	local b2, removed = Bindings.assign(d, "kb", "pass", 1, "Space")
+	check("割り当てを変えられる", b2.kb.pass[1] == "Space")
+	check("重なったキーは元の操作から外す", removed == "through" and b2.kb.through[1] ~= "Space", removed)
+	check("変えたらカスタム扱い", b2.preset == "custom")
+	local b3 = Bindings.assign(b2, "kb", "pass", 2, nil)
+	check("キーを外せる", #b3.kb.pass == 1)
+	local b4 = Bindings.assign(b3, "kb", "pass", 1, "Slash")
+	check("チャットの / は割り当てられない", b4.kb.pass[1] == "Space")
+	local b5 = Bindings.assign(d, "pad", "shoot", 1, "ButtonR1")
+	check("ゲームパッドも変えられる (重なりは外す)", b5.pad.shoot[1] == "ButtonR1" and #b5.pad.r1 == 0)
+	-- 検証: 壊れた / 悪意のあるデータ
+	local v = Bindings.validate({ kb = { pass = { "K", "K", "Escape", "J", "X" }, evil = { "A" } }, pad = { pass = { "ButtonA", "ButtonB" } } })
+	check("重複・禁止キー・数の超過を捨てる", #v.kb.pass == 2 and v.kb.pass[1] == "K" and v.kb.pass[2] == "J" and v.kb.evil == nil and #v.pad.pass == 1, #v.kb.pass)
+	check("壊れた値は既定値", Bindings.validate("x").preset == "mouse" and Bindings.validate(nil).kb.pass[1] == "MouseButton1")
+	local L = Bindings.lookup(d)
+	check("引き当て: キー → 操作", L.kb.MouseButton1 == "pass" and L.kb.W == "moveUp" and L.pad.ButtonA == "pass")
+	check("表記", Bindings.label(d, "kb", "pass") == "L-Click / K" and Bindings.display("DPadUp") == "D-Pad ↑")
+	local labels = 0
+	for _, a in Bindings.ACTIONS do
+		if Locale.Tables.ja["action." .. a.id] and Locale.Tables.en["action." .. a.id] then
+			labels += 1
+		end
+	end
+	check("全ての操作に日英の名前", labels == #Bindings.ACTIONS, labels)
+end
+
 print(("%d checks, %d failures"):format(checks, failures))
 if failures > 0 then
 	error("spec failed")

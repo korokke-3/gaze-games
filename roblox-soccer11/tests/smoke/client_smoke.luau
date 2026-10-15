@@ -108,6 +108,43 @@ Check("結果画面に「もう一度」", FindButton("Play again") ~= nil)
 local back = FindButton("Back to menu")
 Check("メニューへ戻れる", back ~= nil and pcall(back.fn))
 
+-- 操作設定: パスを G に変える
+local ctrlTab = FindButton("Controls")
+Check("操作設定のタブ", ctrlTab ~= nil and pcall(ctrlTab.fn))
+local slot = FindButton("L-Click")
+Check("パスの枠 (L-Click) がある", slot ~= nil)
+slot.fn()
+Check("押すと入力待ちになる", FindButton("Press a key...") ~= nil)
+Fire("InputBegan", { UserInputType = Enum.UserInputType.Keyboard, KeyCode = { Name = "G" } }, false)
+Check("G を割り当てた枠が出る", FindButton("G") ~= nil)
+Frames(60) -- 保存は少し待ってから
+local saved = CallsOf("SaveBindings")
+Check("割り当てをサーバーへ保存", #saved >= 1 and saved[#saved].args[1].kb.pass[1] == "G", #saved)
+-- 既に使われているキーへ: Space (スルー) をパスに
+FindButton("K").fn()
+Fire("InputBegan", { UserInputType = Enum.UserInputType.Keyboard, KeyCode = { Name = "Space" } }, false)
+Frames(60)
+local s2 = CallsOf("SaveBindings")
+local last = s2[#s2].args[1]
+Check("重なったキーはスルーから外れる", last.kb.pass[2] == "Space" and last.kb.through[1] ~= "Space")
+-- 取消 (Esc) と禁止キー (/)
+FindButton("G").fn()
+Fire("InputBegan", { UserInputType = Enum.UserInputType.Keyboard, KeyCode = { Name = "Slash" } }, false)
+Check("禁止キーは割り当てない", FindButton("G") ~= nil)
+-- ゲームパッド表示
+local padBtn = FindButton("Gamepad")
+Check("ゲームパッドの割り当て画面", padBtn ~= nil and pcall(padBtn.fn) and FindButton("A") ~= nil)
+-- プリセット
+local keysPreset = FindButton("Preset: keyboard only")
+Check("プリセットを選べる", keysPreset ~= nil and pcall(keysPreset.fn))
+Frames(60)
+local s3 = CallsOf("SaveBindings")
+Check("キーボードのみのプリセット (K = パス)", s3[#s3].args[1].kb.pass[1] == "K")
+FindButton("Keyboard + mouse").fn()
+FindButton("K").fn()
+Fire("InputBegan", { UserInputType = Enum.UserInputType.Keyboard, KeyCode = { Name = "G" } }, false)
+Frames(60)
+
 -- オンライン (協力)
 local onlineTab = FindButton("Online")
 Check("オンラインのタブ", onlineTab ~= nil and pcall(onlineTab.fn))
@@ -148,7 +185,7 @@ local prevButtons = {}
 local seq = 0
 local applied = 0
 local okO, errO = pcall(function()
-	for i = 1, 30 * 70 do
+	for i = 1, 30 * 160 do
 		server:update(1 / 30)
 		if i % 2 == 0 then
 			local str
@@ -182,6 +219,19 @@ local okO, errO = pcall(function()
 end)
 Check("オンライン試合を描画し続けられる", okO, errO)
 Check("入力がサーバーへ届き、試合に反映される", applied >= 5, applied)
+local sawG = false
+Press("G")
+Frames(2)
+for _, c2 in Calls do
+	if c2.name == "MatchInput" then
+		local inp = Snapshot.unpackInput(c2.args[1])
+		if inp and inp.buttons.pass then
+			sawG = true
+		end
+	end
+end
+Release("G")
+Check("割り当てたキー (G) でパスが送られる", sawG)
 Check("サーバーの試合が終わる", server.ended)
 local r = server.result
 local function st(t)

@@ -164,7 +164,7 @@ local function node(parent, name, modulePath)
 	return n
 end
 Shared = node(rs, "Shared")
-for _, nme in { "Config", "Locale", "Rewards", "Match", "Net", "Snapshot" } do
+for _, nme in { "Config", "Locale", "Rewards", "Match", "Net", "Snapshot", "Bindings" } do
 	node(Shared, nme, "shared/" .. nme)
 end
 ClientRoot = node(nil, "Client", "client/init")
@@ -214,6 +214,7 @@ function Frames(n, dt)
 	for _ = 1, n do
 		FakeClock += dt
 		Fire("RenderStepped", dt)
+		RunPending()
 	end
 end
 function FindButton(text)

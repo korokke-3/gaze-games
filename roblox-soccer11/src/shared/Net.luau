@@ -15,6 +15,7 @@ local EVENTS = {
 	"EquipItem", -- (kind: "kit" | "ball", id: string)
 	"PromptPurchase", -- (kind: "pass" | "product", key: string)
 	"SaveSettings", -- (settings: table)
+	"SaveBindings", -- (bindings: table)  操作の割り当て
 	"RoomList", -- ()
 	"RoomCreate", -- (mode: "coop" | "versus", opts: table)
 	"RoomJoin", -- (id: number)

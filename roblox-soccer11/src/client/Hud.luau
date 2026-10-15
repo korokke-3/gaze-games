@@ -20,41 +20,46 @@ local GOOD = Color3.fromRGB(90, 255, 120)
 local BAD = Color3.fromRGB(255, 100, 100)
 local INFO = Color3.fromRGB(255, 255, 255)
 
--- 操作ガイド: { キーボードの表記, ゲームパッドの表記, 説明のキー }
+local Bindings = require(Shared:WaitForChild("Bindings"))
+
+-- 操作ガイド: { 表記の作り方, 説明のキー }
+--   { "pass" }            その操作のキー
+--   { "l1", "+", "pass" }  組み合わせ (各操作の 1 つ目のキー)
+--   "aim" / "flick" / "flickLR" / "moves" / "zoom"  特別な表記
 local GUIDE = {
 	attack = {
-		{ "Mouse", "LS", "guide.aim" },
-		{ "L-Click (hold)", "A", "guide.pass" },
-		{ "Space", "Y", "guide.through" },
-		{ "E", "B", "guide.lofted" },
-		{ "R-Click (hold)", "X", "guide.shoot" },
-		{ "Shift", "RT", "guide.dash" },
-		{ "Q + Click / Space", "LB + A/Y/X", "guide.l1" },
-		{ "R + R-Click / L-Click", "RB + X / RB + A", "guide.r1" },
-		{ "← ↑ → ↓", "RS", "guide.feint" },
-		{ "Wheel", "—", "guide.zoom" },
+		{ "aim", "guide.aim" },
+		{ { "pass" }, "guide.pass" },
+		{ { "through" }, "guide.through" },
+		{ { "lofted" }, "guide.lofted" },
+		{ { "shoot" }, "guide.shoot" },
+		{ { "dash" }, "guide.dash" },
+		{ { "l1", "+", "pass" }, "guide.l1" },
+		{ { "r1", "+", "shoot" }, "guide.r1" },
+		{ "flick", "guide.feint" },
+		{ "zoom", "guide.zoom" },
 	},
 	defense = {
-		{ "L-Click (hold)", "A", "guide.pressure" },
-		{ "F", "LT", "guide.matchup" },
-		{ "R", "RB", "guide.callpress" },
-		{ "R-Click", "X", "guide.charge" },
-		{ "E", "B", "guide.slide" },
-		{ "Q", "LB", "guide.switch" },
-		{ "← ↑ → ↓", "RS", "guide.switchdir" },
-		{ "Space (hold)", "Y", "guide.gk" },
-		{ "Z / C", "D-Pad ↓↑", "guide.level" },
+		{ { "pass" }, "guide.pressure" },
+		{ { "l2" }, "guide.matchup" },
+		{ { "r1" }, "guide.callpress" },
+		{ { "shoot" }, "guide.charge" },
+		{ { "lofted" }, "guide.slide" },
+		{ { "l1" }, "guide.switch" },
+		{ "flick", "guide.switchdir" },
+		{ { "through" }, "guide.gk" },
+		{ { "levelDown", "/", "levelUp" }, "guide.level" },
 	},
 	setpiece = {
-		{ "Mouse", "LS", "guide.sp.aim" },
-		{ "L-Click (hold)", "A", "guide.sp.pass" },
-		{ "E (hold)", "B", "guide.sp.lofted" },
-		{ "Space", "Y", "guide.sp.through" },
-		{ "R-Click", "X", "guide.sp.shoot" },
-		{ "← →", "RS", "guide.sp.curl" },
+		{ "aim", "guide.sp.aim" },
+		{ { "pass" }, "guide.sp.pass" },
+		{ { "lofted" }, "guide.sp.lofted" },
+		{ { "through" }, "guide.sp.through" },
+		{ { "shoot" }, "guide.sp.shoot" },
+		{ "flickLR", "guide.sp.curl" },
 	},
 	keeper = {
-		{ "WASD", "LS", "guide.pk.dive" },
+		{ "moves", "guide.pk.dive" },
 	},
 }
 
@@ -238,7 +243,55 @@ function Hud.new(lang)
 	}, self.guide)
 	self.guideKey = nil
 	self.helpVisible = true
+	self.bindings = Bindings.default()
+	self.mouseAim = true
+	self.bindVersion = 0
 	return self
+end
+
+--- 操作の割り当てが変わった時 (ガイドの表記を作り直す)。
+function Hud:setBindings(b, mouseAim)
+	self.bindings = b or Bindings.default()
+	self.mouseAim = mouseAim ~= false
+	self.bindVersion += 1
+	self.guideKey = nil
+end
+
+--- ガイドの 1 行の表記。
+function Hud:_glyph(spec, device)
+	local b = self.bindings
+	local dev = device == "gamepad" and "pad" or "kb"
+	local function first(action)
+		local map = dev == "pad" and b.pad or b.kb
+		local list = map[action]
+		return Bindings.display(list and list[1])
+	end
+	if spec == "aim" then
+		if dev == "pad" then
+			return "LS"
+		end
+		return self.mouseAim and "Mouse" or (first("moveUp") .. first("moveLeft") .. first("moveDown") .. first("moveRight"))
+	elseif spec == "moves" then
+		return dev == "pad" and "LS" or (first("moveUp") .. first("moveLeft") .. first("moveDown") .. first("moveRight"))
+	elseif spec == "flick" then
+		return dev == "pad" and "RS" or (first("flickLeft") .. " " .. first("flickUp") .. " " .. first("flickRight") .. " " .. first("flickDown"))
+	elseif spec == "flickLR" then
+		return dev == "pad" and "RS" or (first("flickLeft") .. " " .. first("flickRight"))
+	elseif spec == "zoom" then
+		return dev == "pad" and "—" or "Wheel"
+	end
+	if #spec == 1 then
+		return Bindings.label(b, dev, spec[1])
+	end
+	local parts = {}
+	for _, x in spec do
+		if x == "+" or x == "/" then
+			table.insert(parts, " " .. x .. " ")
+		else
+			table.insert(parts, first(x))
+		end
+	end
+	return table.concat(parts)
 end
 
 function Hud:toggleHelp()
@@ -248,7 +301,7 @@ end
 
 --- 操作ガイドを作り直す (状況・機器が変わった時だけ)。
 function Hud:_renderGuide(context, device)
-	local key = context .. ":" .. device
+	local key = context .. ":" .. device .. ":" .. self.bindVersion
 	if self.guideKey == key then
 		return
 	end
@@ -282,7 +335,7 @@ function Hud:_renderGuide(context, device)
 		return
 	end
 	for i, row in GUIDE[context] do
-		local glyph = device == "gamepad" and row[2] or row[1]
+		local glyph = self:_glyph(row[1], device)
 		local r = new("Frame", { BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 20), LayoutOrder = i }, self.guide)
 		local g = new("Frame", {
 			BackgroundColor3 = Color3.fromRGB(235, 235, 235),
@@ -304,7 +357,7 @@ function Hud:_renderGuide(context, device)
 			TextScaled = false,
 			TextSize = 13,
 			TextXAlignment = Enum.TextXAlignment.Left,
-			Text = Locale.t(self.lang, row[3]),
+			Text = Locale.t(self.lang, row[2]),
 		})
 		d.TextStrokeTransparency = 1
 	end

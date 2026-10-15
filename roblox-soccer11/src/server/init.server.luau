@@ -126,6 +126,11 @@ Net.event("PromptPurchase").OnServerEvent:Connect(function(player, kind, key)
 		Monetization.prompt(player, kind, key)
 	end
 end)
+Net.event("SaveBindings").OnServerEvent:Connect(function(player, bindings)
+	if not throttled(player, "bindings", 1) then
+		Store.saveBindings(player, bindings)
+	end
+end)
 Net.event("SaveSettings").OnServerEvent:Connect(function(player, settings)
 	if not throttled(player, "settings", 1) then
 		Store.saveSettings(player, settings)

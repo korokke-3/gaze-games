@@ -43,6 +43,7 @@ function Data.default()
 		equipped = { kit = "classic", ball = "classic" },
 		stats = { matches = 0, wins = 0, draws = 0, losses = 0, goals = 0 },
 		settings = {},
+		bindings = nil, -- 操作の割り当て (nil = 既定)
 		receipts = {},
 	}
 end

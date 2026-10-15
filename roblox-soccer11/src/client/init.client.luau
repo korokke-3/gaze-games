@@ -16,6 +16,7 @@ local Config = require(Shared:WaitForChild("Config"))
 local Locale = require(Shared:WaitForChild("Locale"))
 local Match = require(Shared:WaitForChild("Match"))
 local Net = require(Shared:WaitForChild("Net"))
+local Bindings = require(Shared:WaitForChild("Bindings"))
 
 local World = require(script:WaitForChild("World"))
 local Hud = require(script:WaitForChild("Hud"))
@@ -52,6 +53,7 @@ local profile = nil
 local current = nil -- { match, world, input, conn, finished, view, online }
 local demo = nil
 local device = "keyboard"
+local bindings = Bindings.default()
 
 local hud = Hud.new(lang)
 hud.gui.Enabled = false
@@ -161,7 +163,9 @@ local function runMatch(match, view, sink, opts, step, onEnd)
 			world:zoom(delta)
 		end,
 		mouseAim = opts.mouseAim ~= false,
+		bindings = bindings,
 	})
+	hud:setBindings(bindings, opts.mouseAim ~= false)
 	device = input.device
 	hud.gui.Enabled = true
 	local c = { match = match, world = world, input = input, finished = false, view = view }
@@ -296,7 +300,34 @@ end
 
 -- ================================================================ メニュー
 local saveToken = 0
+local bindToken = 0
+local function saveBindings()
+	bindToken += 1
+	local token = bindToken
+	task.delay(1.2, function()
+		if token == bindToken then
+			Net.event("SaveBindings"):FireServer(bindings)
+		end
+	end)
+end
 menu = Menu.new(menuGui, lang, {
+	onBind = function(dev, action, slot, key)
+		local removed
+		bindings, removed = Bindings.assign(bindings, dev, action, slot, key)
+		menu:setBindings(bindings)
+		if removed ~= nil and key ~= nil then
+			menu:toast(Locale.t(lang, "controls.moved", Bindings.display(key), Locale.t(lang, "action." .. removed)))
+		end
+		saveBindings()
+	end,
+	onPreset = function(name)
+		bindings = Bindings.fromPreset(name)
+		menu:setBindings(bindings)
+		-- キーボードのみのプリセットは、狙いも WASD にする
+		menu.opts.mouseAim = name ~= "keys"
+		saveBindings()
+		Net.event("SaveSettings"):FireServer(menu.opts)
+	end,
 	onStart = function(opts)
 		startSolo(opts)
 	end,
@@ -354,6 +385,10 @@ menu.myId = player.UserId
 Net.event("State").OnClientEvent:Connect(function(state)
 	local first = profile == nil
 	profile = state
+	if first and state.bindings then
+		bindings = Bindings.validate(state.bindings)
+		menu:setBindings(bindings)
+	end
 	menu:setProfile(state)
 	if first and state.readOnly then
 		menu:toast(Locale.t(lang, "notify.readonly"))

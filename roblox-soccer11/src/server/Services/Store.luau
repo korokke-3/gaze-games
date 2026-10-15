@@ -11,6 +11,7 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared:WaitForChild("Config"))
 local Net = require(Shared:WaitForChild("Net"))
 local Data = require(script.Parent.Data)
+local Bindings = require(Shared:WaitForChild("Bindings"))
 
 local Store = {}
 
@@ -106,6 +107,7 @@ function Store.state(player: Player)
 		},
 		stats = data.stats,
 		settings = data.settings,
+		bindings = data.bindings or Bindings.default(),
 		readOnly = Data.isReadOnly(player),
 		-- ID 未作成の商品はクライアントで購入ボタンを無効にする
 		available = {
@@ -194,6 +196,16 @@ function Store.saveSettings(player: Player, raw: any)
 			data.settings[k] = v
 		end
 	end
+	Data.markDirty(player)
+end
+
+--- 操作の割り当てを保存する (不正なキーは Bindings.validate で捨てる)。
+function Store.saveBindings(player: Player, raw: any)
+	local data = Data.get(player)
+	if data == nil then
+		return
+	end
+	data.bindings = Bindings.validate(raw)
 	Data.markDirty(player)
 end
 
