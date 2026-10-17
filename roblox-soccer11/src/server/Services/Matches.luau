@@ -19,7 +19,7 @@ local Store = require(script.Parent.Store)
 
 local Matches = {}
 
-local MIN_REAL_RATIO = 0.8 -- 実時間でこれ以上経っていないと報酬なし
+local MIN_REAL_RATIO = Config.Rewards.MinElapsedRatio -- 実時間でこれ以上経っていないと報酬なし
 local sessions: { [Player]: { t: number, length: number, difficulty: number, cup: boolean } } = {}
 
 function Matches.start(player: Player, cfg: any)

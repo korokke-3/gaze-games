@@ -167,6 +167,35 @@ local function runMatch(match, view, sink, opts, step, onEnd)
 	})
 	hud:setBindings(bindings, opts.mouseAim ~= false)
 	device = input.device
+	-- スマホは操作ガイドが左スティックと重なるので、最初は隠す (一時停止メニューから出せる)
+	hud.helpVisible = device ~= "touch"
+	hud.guide.Visible = hud.helpVisible
+	-- 初めての人向けの操作ヒント (全部やったら二度と出さない)
+	if not menu.opts.tipsDone then
+		local g = function(spec)
+			return hud:_glyph(spec, device)
+		end
+		local used = input.used
+		hud:setTips({
+			{ text = Locale.t(lang, "tip.pass", g("aim"), g({ "pass" })), done = function()
+				return used.pass == true
+			end },
+			{ text = Locale.t(lang, "tip.shoot", g({ "shoot" })), done = function()
+				return used.shoot == true
+			end },
+			{ text = Locale.t(lang, "tip.dash", g({ "dash" })), done = function()
+				return used.dash == true
+			end },
+			{ text = Locale.t(lang, "tip.switch", g({ "l1" })), done = function()
+				return used.l1 == true
+			end },
+		}, function()
+			menu.opts.tipsDone = true
+			Net.event("SaveSettings"):FireServer(menu.opts)
+		end)
+	else
+		hud:setTips(nil)
+	end
 	hud.gui.Enabled = true
 	local c = { match = match, world = world, input = input, finished = false, view = view }
 	c.conn = RunService.RenderStepped:Connect(function(dt)
@@ -229,6 +258,23 @@ startSolo = function(opts)
 	runMatch(match, view, Input.localSink(match, SOLO_SEAT), opts, function(dt)
 		match:update(dt)
 	end, soloFinished)
+	hud:setPauseHandlers({
+		online = false,
+		onOpen = function()
+			if not match.paused then
+				match:command(SOLO_SEAT, "pause")
+			end
+		end,
+		onResume = function()
+			if match.paused then
+				match:command(SOLO_SEAT, "pause")
+			end
+		end,
+		onQuit = function()
+			-- 途中でやめた試合は報酬なし (MatchFinished を送らない)
+			backToMenu("play")
+		end,
+	})
 end
 
 -- ================================================================ オンライン
@@ -237,7 +283,7 @@ local online = nil -- { remote }
 local function onlineStart(info)
 	local remote = RemoteMatch.new(info, player.UserId)
 	local sink = Input.netSink(function(packet)
-		Net.event("MatchInput"):FireServer(packet)
+		Net.event("MatchInput"):FireServer(buffer.fromstring(packet))
 	end)
 	local view = { seatId = player.UserId, myTeam = remote.myTeam, online = true }
 	local c = runMatch(remote, view, sink, menu.opts, function()
@@ -247,6 +293,14 @@ local function onlineStart(info)
 		return c.input:currentAim()
 	end
 	online = { remote = remote }
+	hud:setPauseHandlers({
+		online = true,
+		onQuit = function()
+			Net.event("RoomLeave"):FireServer()
+			online = nil
+			backToMenu("online")
+		end,
+	})
 end
 
 --- サーバーの結果を「自分のチームが左」に直して、結果画面に出す。
@@ -411,6 +465,9 @@ Net.event("OnlineStart").OnClientEvent:Connect(function(info)
 end)
 Net.event("OnlineSnap").OnClientEvent:Connect(function(str)
 	if online ~= nil then
+		if typeof(str) == "buffer" then
+			str = buffer.tostring(str)
+		end
 		online.remote:apply(str, os.clock())
 	end
 end)

@@ -180,6 +180,7 @@ local SETTING_KEYS = {
 	night = "boolean",
 	assist = "number",
 	mouseAim = "boolean",
+	tipsDone = "boolean",
 }
 
 function Store.saveSettings(player: Player, raw: any)

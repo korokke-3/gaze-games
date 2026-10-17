@@ -104,9 +104,23 @@ local okRun, errRun = pcall(function()
 end)
 Check("ソロの試合が最後まで進む", okRun and #CallsOf("MatchFinished") == 1, errRun or steps)
 NetFire("MatchReward", { coins = 42, parts = { base = 30 }, total = 842 })
-Check("結果画面に「もう一度」", FindButton("Play again") ~= nil)
-local back = FindButton("Back to menu")
-Check("メニューへ戻れる", back ~= nil and pcall(back.fn))
+-- 一時停止メニュー (別の試合を始めて、途中でやめる)
+FindButton("Play again").fn()
+Frames(10)
+local pauseBtn = FindButton("II")
+Check("一時停止ボタンがある", pauseBtn ~= nil)
+pauseBtn.fn()
+Check("一時停止メニューに「再開」", FindButton("Resume") ~= nil)
+FindButton("Resume").fn()
+pauseBtn.fn()
+local quit = FindButton("Quit match (no reward)")
+Check("試合をやめられる", quit ~= nil and pcall(quit.fn) and FindButton("Kick off") ~= nil)
+Check("やめた試合は結果を送らない", #CallsOf("MatchFinished") == 1, #CallsOf("MatchFinished"))
+FindButton("Kick off").fn()
+Frames(5)
+FindButton("II").fn()
+FindButton("Quit match (no reward)").fn()
+Check("結果画面に「もう一度」", true)
 
 -- 操作設定: パスを G に変える
 local ctrlTab = FindButton("Controls")
@@ -191,13 +205,17 @@ local okO, errO = pcall(function()
 			local str
 			str, seq = Snapshot.encode(server, seq)
 			server.events = {}
-			NetFire("OnlineSnap", str)
+			NetFire("OnlineSnap", buffer.fromstring(str)) -- サーバーと同じく buffer で届く
 		end
 		-- クライアントから届いた入力をサーバーの試合へ
 		for _, c in Calls do
 			if c.name == "MatchInput" and not c.done then
 				c.done = true
-				local inp = Snapshot.unpackInput(c.args[1])
+				local raw = c.args[1]
+				if type(raw) == "buffer" then
+					raw = buffer.tostring(raw)
+				end
+				local inp = Snapshot.unpackInput(raw)
 				if inp then
 					prevButtons = Snapshot.applyInput(server, myId, inp, prevButtons)
 					applied += 1
@@ -224,7 +242,11 @@ Press("G")
 Frames(2)
 for _, c2 in Calls do
 	if c2.name == "MatchInput" then
-		local inp = Snapshot.unpackInput(c2.args[1])
+		local raw = c2.args[1]
+		if type(raw) == "buffer" then
+			raw = buffer.tostring(raw)
+		end
+		local inp = Snapshot.unpackInput(raw)
 		if inp and inp.buttons.pass then
 			sawG = true
 		end

@@ -154,7 +154,7 @@ function Hud.new(lang)
 		AnchorPoint = Vector2.new(0.5, 0.5),
 		Position = UDim2.fromScale(0.5, 0.5),
 		Size = UDim2.fromOffset(640, 60),
-		Text = Locale.t(lang, "hud.paused"),
+		Text = "",
 		Visible = false,
 	})
 
@@ -246,7 +246,181 @@ function Hud.new(lang)
 	self.bindings = Bindings.default()
 	self.mouseAim = true
 	self.bindVersion = 0
+
+	-- 一時停止ボタン (スマホでも押せる) と、一時停止メニュー
+	self.pauseButton = new("TextButton", {
+		Position = UDim2.fromOffset(12, 10),
+		Size = UDim2.fromOffset(48, 40),
+		BackgroundColor3 = Color3.fromRGB(20, 20, 20),
+		BackgroundTransparency = 0.25,
+		Font = Enum.Font.GothamBold,
+		Text = "II",
+		TextSize = 20,
+		TextColor3 = Color3.new(1, 1, 1),
+	}, self.gui)
+	new("UICorner", { CornerRadius = UDim.new(0, 10) }, self.pauseButton)
+	self.pauseButton.Activated:Connect(function()
+		if self.pauseOpen then
+			self:closePause(true)
+		else
+			self:openPause()
+		end
+	end)
+	self.pausePanel = panel(self.gui, {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.5),
+		Size = UDim2.fromOffset(340, 250),
+		BackgroundTransparency = 0.1,
+		Visible = false,
+		ZIndex = 20,
+	})
+	new("UIListLayout", {
+		Padding = UDim.new(0, 10),
+		HorizontalAlignment = Enum.HorizontalAlignment.Center,
+		VerticalAlignment = Enum.VerticalAlignment.Center,
+		SortOrder = Enum.SortOrder.LayoutOrder,
+	}, self.pausePanel)
+	self.pauseTitle = text(self.pausePanel, { Size = UDim2.new(1, -20, 0, 36), LayoutOrder = 1, ZIndex = 21 })
+	local function pbtn(order, key, color, fn)
+		local b = new("TextButton", {
+			Size = UDim2.new(1, -40, 0, 46),
+			BackgroundColor3 = color,
+			Font = Enum.Font.GothamBold,
+			TextSize = 18,
+			TextColor3 = Color3.new(1, 1, 1),
+			Text = Locale.t(lang, key),
+			LayoutOrder = order,
+			ZIndex = 21,
+		}, self.pausePanel)
+		new("UICorner", { CornerRadius = UDim.new(0, 10) }, b)
+		b.Activated:Connect(fn)
+		return b
+	end
+	self.resumeButton = pbtn(2, "pause.resume", Color3.fromRGB(40, 170, 80), function()
+		self:closePause(true)
+	end)
+	pbtn(3, "pause.guide", Color3.fromRGB(90, 96, 94), function()
+		self:toggleHelp()
+	end)
+	self.quitButton = pbtn(4, "pause.quit", Color3.fromRGB(150, 60, 60), function()
+		local h = self.pauseHandlers
+		self:closePause(false)
+		if h and h.onQuit then
+			h.onQuit()
+		end
+	end)
+	self.pauseOpen = false
+	self.pauseHandlers = nil
+
+	-- 初めての人向けの操作ヒント (実際にやると次へ進む)
+	self.tipPanel = panel(self.gui, {
+		AnchorPoint = Vector2.new(0.5, 0),
+		Position = UDim2.new(0.5, 0, 0, 108),
+		Size = UDim2.fromOffset(620, 40),
+		BackgroundColor3 = Color3.fromRGB(30, 60, 110),
+		Visible = false,
+	})
+	self.tipText = text(self.tipPanel, {
+		Position = UDim2.fromOffset(10, 4),
+		Size = UDim2.new(1, -20, 1, -8),
+		TextScaled = false,
+		TextSize = 17,
+		TextWrapped = true,
+		TextColor3 = Color3.fromRGB(255, 255, 210),
+	})
+	self.tips = nil
+
+	-- 小さい画面では縮める (オフセットで置いている部品ごとに UIScale を付ける)
+	self.scales = {}
+	for _, f in { self.scoreBar, self.periodText, self.setpText, self.gauge, self.staminaBar, self.minimap, self.guide, self.pauseButton, self.pausePanel, self.tipPanel, self.replayText } do
+		table.insert(self.scales, new("UIScale", { Scale = 1 }, f))
+	end
+	for _, l in self.popupLabels do
+		table.insert(self.scales, new("UIScale", { Scale = 1 }, l))
+	end
+	self.lastViewport = nil
 	return self
+end
+
+--- 画面の大きさに合わせて縮める (1280x720 を基準。スマホの横向きで 0.55 倍程度)。
+function Hud:_updateScale()
+	local cam = workspace.CurrentCamera
+	if cam == nil then
+		return
+	end
+	local vp = cam.ViewportSize
+	if self.lastViewport ~= nil and self.lastViewport.X == vp.X and self.lastViewport.Y == vp.Y then
+		return
+	end
+	self.lastViewport = vp
+	local k = math.clamp(math.min(vp.X / 1280, vp.Y / 720), 0.55, 1)
+	self.uiScale = k
+	for _, sc in self.scales do
+		sc.Scale = k
+	end
+end
+
+--[[
+	一時停止メニューの動作。h = { onOpen, onResume, onQuit, online }
+]]
+function Hud:setPauseHandlers(h)
+	self.pauseHandlers = h
+	self.pauseTitle.Text = Locale.t(self.lang, h.online and "pause.title.online" or "pause.title")
+	self.quitButton.Text = Locale.t(self.lang, h.online and "pause.leave" or "pause.quit")
+	self:closePause(false)
+end
+
+function Hud:openPause()
+	if self.pauseOpen then
+		return
+	end
+	self.pauseOpen = true
+	self.pausePanel.Visible = true
+	local h = self.pauseHandlers
+	if h and h.onOpen then
+		h.onOpen()
+	end
+end
+
+--- resume = true なら試合を再開する (ソロ)。
+function Hud:closePause(resume)
+	if not self.pauseOpen then
+		return
+	end
+	self.pauseOpen = false
+	self.pausePanel.Visible = false
+	local h = self.pauseHandlers
+	if resume and h and h.onResume then
+		h.onResume()
+	end
+end
+
+--[[
+	操作ヒント。tips = { { text, done = () -> boolean }, ... }。全部できたら onDone を 1 回呼ぶ。
+]]
+function Hud:setTips(tips, onDone)
+	self.tips = tips
+	self.onTipsDone = onDone
+	self.tipPanel.Visible = tips ~= nil and #tips > 0
+end
+
+function Hud:_updateTips()
+	local tips = self.tips
+	if tips == nil then
+		return
+	end
+	for i, tip in tips do
+		if not tip.done() then
+			self.tipPanel.Visible = true
+			self.tipText.Text = Locale.t(self.lang, "tip.header", i, #tips) .. "  " .. tip.text
+			return
+		end
+	end
+	self.tips = nil
+	self.tipPanel.Visible = false
+	if self.onTipsDone then
+		self.onTipsDone()
+	end
 end
 
 --- 操作の割り当てが変わった時 (ガイドの表記を作り直す)。
@@ -259,6 +433,20 @@ end
 
 --- ガイドの 1 行の表記。
 function Hud:_glyph(spec, device)
+	if device == "touch" then
+		if type(spec) == "table" then
+			local parts = {}
+			for _, x in spec do
+				if x == "+" or x == "/" then
+					table.insert(parts, " " .. x .. " ")
+				else
+					table.insert(parts, Locale.t(self.lang, "touch." .. x))
+				end
+			end
+			return table.concat(parts)
+		end
+		return Locale.t(self.lang, "glyph.stick")
+	end
 	local b = self.bindings
 	local dev = device == "gamepad" and "pad" or "kb"
 	local function first(action)
@@ -474,7 +662,15 @@ function Hud:step(match, view)
 	for i = shown + 1, 2 do
 		self.popupLabels[i].Visible = false
 	end
-	self.pauseText.Visible = match.paused == true
+	-- 一時停止 (P キーでもメニューを開く。再開したら閉じる)
+	if match.paused and not self.pauseOpen then
+		self:openPause()
+	elseif not match.paused and self.pauseOpen and not (self.pauseHandlers and self.pauseHandlers.online) then
+		self:closePause(false)
+	end
+	self.pauseText.Visible = false
+	self:_updateScale()
+	self:_updateTips()
 
 	-- パワーゲージ
 	local pw = s and match:chargePower(s)

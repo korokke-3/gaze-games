@@ -17,7 +17,6 @@ local EN = {
 	["result.draw"] = "Draw",
 	["result.stats"] = "Passes %d / Intercepted %d / Skill beats %d of %d / Offsides %d / Fouls %d",
 	["hud.score"] = "YOU %d - %d CPU",
-	["hud.paused"] = "Paused (P to resume)",
 	["setp.throw"] = "Throw-in",
 	["setp.corner"] = "Corner kick",
 	["setp.gk"] = "Goal kick",
@@ -263,6 +262,18 @@ local EN = {
 	["controls.padonly"] = "Sticks can't be changed (left = move, right = feints)",
 	["controls.current"] = "Current: %s",
 	["controls.notallowed"] = "%s can't be used (reserved by Roblox).",
+	["pause.title"] = "Paused",
+	["pause.title.online"] = "Menu (the match keeps going)",
+	["pause.resume"] = "Resume",
+	["pause.guide"] = "Show / hide controls",
+	["pause.quit"] = "Quit match (no reward)",
+	["pause.leave"] = "Leave the room",
+	["tip.header"] = "TIP %d/%d",
+	["tip.pass"] = "Aim with %s, hold %s and release to pass (longer = stronger)",
+	["tip.shoot"] = "Near the goal, hold %s and release to shoot",
+	["tip.dash"] = "Hold %s while moving to sprint",
+	["tip.switch"] = "On defence, press %s to switch to another player",
+	["glyph.stick"] = "the left stick",
 }
 
 local JA = {
@@ -276,7 +287,6 @@ local JA = {
 	["result.draw"] = "引き分け",
 	["result.stats"] = "パス %d / カットされた %d / 技で抜いた %d / %d 回 / オフサイド %d / ファウル %d",
 	["hud.score"] = "あなた %d - %d CPU",
-	["hud.paused"] = "一時停止中 (P で再開)",
 	["setp.throw"] = "スローイン",
 	["setp.corner"] = "コーナーキック",
 	["setp.gk"] = "ゴールキック",
@@ -522,6 +532,18 @@ local JA = {
 	["controls.padonly"] = "スティックは変更できません (左 = 移動、右 = フェイント)",
 	["controls.current"] = "現在: %s",
 	["controls.notallowed"] = "%s は使えません (Roblox が使うキーです)。",
+	["pause.title"] = "一時停止",
+	["pause.title.online"] = "メニュー (試合は続いています)",
+	["pause.resume"] = "再開",
+	["pause.guide"] = "操作ガイドの表示 / 非表示",
+	["pause.quit"] = "試合をやめる (報酬なし)",
+	["pause.leave"] = "部屋を出る",
+	["tip.header"] = "ヒント %d/%d",
+	["tip.pass"] = "%s で狙って、%s を長押し → 離すとパス (長く押すほど強い)",
+	["tip.shoot"] = "ゴール前で %s を長押し → 離すとシュート",
+	["tip.dash"] = "%s を押しながら動くとダッシュ",
+	["tip.switch"] = "守備では %s で別の選手に切り替え",
+	["glyph.stick"] = "左スティック",
 }
 
 Locale.Tables = { en = EN, ja = JA }

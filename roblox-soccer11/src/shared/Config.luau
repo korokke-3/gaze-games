@@ -188,16 +188,6 @@ Config.Online = {
 	MaxInputsPerSecond = 80,
 }
 
--- キー割り当て (スマホ版バーチャルパッドのボタン構成をキーボードに写したもの)
-Config.Keys = {
-	pass = "K",
-	through = "I",
-	shoot = "J",
-	cursor = "U",
-	slide = "L",
-	left_tap = "Q",
-}
-
 -- 技のコマンド (ダッシュをタップしてから WASD を弾く)。向きは「進行方向を前」とした相対方向:
 --   F 前, B 後ろ, S 横 (左右どちらか), X 最初の S と逆の横。上から順に照合する。
 Config.SkillCommands = {
@@ -224,7 +214,7 @@ Config.Rewards = {
 	DifficultyBonus = { 0.8, 0.9, 1.0, 1.15, 1.3 }, -- 難易度ごとの倍率
 	LengthBonus = { [180] = 0.7, [300] = 1.0, [600] = 1.6 },
 	Max = 200, -- 1 試合の上限 (VIP 倍率の前)
-	MinElapsedRatio = 0.9, -- 試合時間のこの割合以上が経っていないと報酬なし
+	MinElapsedRatio = 0.8, -- 実時間で試合時間のこの割合以上が経っていないと報酬なし (ソロ・オンライン共通)
 }
 
 -- キット (自チームの色)。コインで解放する。勝敗には影響しない。

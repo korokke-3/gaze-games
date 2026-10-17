@@ -284,6 +284,12 @@ function Rooms.input(player, packet)
 	if b.n > ONLINE.MaxInputsPerSecond then
 		return
 	end
+	if typeof(packet) == "buffer" then
+		if buffer.len(packet) > 64 then
+			return
+		end
+		packet = buffer.tostring(packet)
+	end
 	local inp = Snapshot.unpackInput(packet)
 	local m = room.members[player]
 	if inp == nil or m == nil then
@@ -319,7 +325,7 @@ function Rooms.finish(room, aborted)
 				shootoutWin = r.shootout ~= nil and r.winner == team,
 			})
 			local data = Data.get(m.player)
-			if data ~= nil and realElapsed >= room.opts.length * 0.8 then
+			if data ~= nil and realElapsed >= room.opts.length * Config.Rewards.MinElapsedRatio then
 				local session = {
 					length = room.opts.length,
 					difficulty = room.mode == "coop" and room.opts.difficulty or Config.DefaultDifficulty,
@@ -394,8 +400,9 @@ function Rooms.tick(dt)
 				local str, seq = Snapshot.encode(match, room.seq)
 				room.seq = seq
 				match.events = {}
+				local buf = buffer.fromstring(str) -- バイナリは buffer で送る (Roblox 推奨の形)
 				for _, m in room.members do
-					Net.event("OnlineSnap"):FireClient(m.player, str)
+					Net.event("OnlineSnap"):FireClient(m.player, buf)
 				end
 			end
 			if match.ended then

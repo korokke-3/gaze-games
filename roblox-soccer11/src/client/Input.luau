@@ -169,6 +169,7 @@ function Input.new(opts)
 	self.lang = opts.lang
 	self.conns = {}
 	self.actionDown = {} -- 移動の操作 -> 押しているか
+	self.used = {} -- 一度でも押した論理ボタン
 	self.lookup = Bindings.lookup(opts.bindings or Bindings.default())
 	self.buttons = {} -- 論理ボタン -> 押しているソースの数
 	self.stick = { x = 0, y = 0 } -- ゲームパッドの左スティック
@@ -210,6 +211,7 @@ function Input:_setDevice(d)
 end
 
 function Input:_buttonDown(b)
+	self.used[b] = true -- 操作ヒントの「やった」判定
 	local n = (self.buttons[b] or 0) + 1
 	self.buttons[b] = n
 	if n == 1 then
@@ -449,11 +451,17 @@ function Input:_buildTouch()
 	root.Parent = self.opts.gui
 	touch.root = root
 
+	-- 画面の大きさに合わせて縮める (指で押せる大きさは保つ: 720 の高さを基準に最小 0.62 倍)
+	local cam = workspace.CurrentCamera
+	local vpY = cam and cam.ViewportSize.Y or 720
+	local k = math.clamp(vpY / 720 * 1.15, 0.62, 1)
+	touch.k = k
+
 	-- 左: アナログスティック (移動・狙い)
 	local base = Instance.new("Frame")
 	base.AnchorPoint = Vector2.new(0, 1)
-	base.Position = UDim2.new(0, 24, 1, -24)
-	base.Size = UDim2.fromOffset(160, 160)
+	base.Position = UDim2.new(0, 24 * k, 1, -24 * k)
+	base.Size = UDim2.fromOffset(160 * k, 160 * k)
 	base.BackgroundColor3 = Color3.new(1, 1, 1)
 	base.BackgroundTransparency = 0.8
 	base.Parent = root
@@ -461,7 +469,7 @@ function Input:_buildTouch()
 	local thumb = Instance.new("Frame")
 	thumb.AnchorPoint = Vector2.new(0.5, 0.5)
 	thumb.Position = UDim2.fromScale(0.5, 0.5)
-	thumb.Size = UDim2.fromOffset(64, 64)
+	thumb.Size = UDim2.fromOffset(64 * k, 64 * k)
 	thumb.BackgroundColor3 = Color3.new(1, 1, 1)
 	thumb.BackgroundTransparency = 0.35
 	thumb.Parent = base
@@ -482,8 +490,10 @@ function Input:_buildTouch()
 		b.Name = "Touch_" .. id
 		b.AnchorPoint = Vector2.new(1, 1)
 		local big = id == "shoot" or id == "pass"
-		b.Size = UDim2.fromOffset(big and 92 or 74, big and 92 or 74)
-		b.Position = UDim2.new(1, -18 - (col - 1) * 96, 1, -150 - (row - 1) * 92)
+		local size = (big and 92 or 74) * k
+		b.Size = UDim2.fromOffset(size, size)
+		b.Position = UDim2.new(1, (-18 - (col - 1) * 96) * k, 1, (-110 - (row - 1) * 92) * k)
+		b.TextSize = math.floor(15 * math.max(k, 0.8))
 		b.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
 		b.BackgroundTransparency = 0.3
 		b.Text = Locale.t(self.lang, atk)

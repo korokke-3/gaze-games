@@ -156,6 +156,7 @@ local DEFAULTS = {
 	night = false,
 	assist = Config.Controls.DefaultAssist,
 	mouseAim = true,
+	tipsDone = false,
 }
 
 --[[

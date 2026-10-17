@@ -229,15 +229,18 @@ local okT, errT = pcall(function()
 		end
 		if i == 30 then
 			local packet = Snapshot.packInput({ move = { x = 1, y = 0 }, aim = { x = 1, y = 0 }, buttons = {} })
-			NetFire("MatchInput", a, packet)
+			NetFire("MatchInput", a, buffer.fromstring(packet)) -- クライアントは buffer で送る
 		end
 	end
 end)
 Check("サーバーで試合が進む (Heartbeat)", okT, errT)
 Check("Snapshot が送られる (15 回/秒前後)", countOf(a, "OnlineSnap") - snaps0 >= 10, countOf(a, "OnlineSnap") - snaps0)
-local snap = Snapshot.decode(lastOf(a, "OnlineSnap").args[1])
+local snapRaw = lastOf(a, "OnlineSnap").args[1]
+Check("Snapshot は buffer で送る", type(snapRaw) == "buffer")
+local snap = Snapshot.decode(buffer.tostring(snapRaw))
 Check("Snapshot に 3 人の操作者", #snap.seats == 3)
 NetFire("MatchInput", a, "garbage")
+NetFire("MatchInput", a, buffer.create(500))
 NetFire("MatchInput", a, 12345)
 Check("壊れた入力でも落ちない", true)
 -- 終了まで (3 分)
