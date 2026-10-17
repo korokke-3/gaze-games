@@ -171,7 +171,7 @@ function World.new(match, lang, style)
 	self.folder.Parent = Workspace
 	buildPitch(self.folder)
 
-	self.actors = {} -- player -> { rig, anchor, shadow, ring, cursor, nextMark, skill, kickT }
+	self.actors = {} -- player -> { rig, anchor, shadow, ring, cursor, nextMark, skill, action }
 	self.clock = 0
 	for _, pl in match.pl do
 		local col = rgb(self:colorFor(pl))
@@ -224,7 +224,7 @@ function World.new(match, lang, style)
 			nextMark = nextMark,
 			skill = skill,
 			skillLabel = skillLabel,
-			kickT = -99,
+			action = nil,
 		}
 	end
 
@@ -345,11 +345,14 @@ function World:step(dt, view)
 		labelFor[lb.player] = lb
 	end
 
-	-- 蹴った選手 (キックの動き)
+	-- 選手の動作 (キックの種類・トラップ・セーブ・チャージ・奪取)
 	self.clock += dt
 	for _, e in match.events do
-		if e.kind == "kick" and e.player ~= nil and self.actors[e.player] ~= nil then
-			self.actors[e.player].kickT = self.clock
+		if e.player ~= nil and self.actors[e.player] ~= nil then
+			local kind = e.kind == "kick" and (e.tag or "pass") or e.kind
+			if Rig.DURATION[kind] then
+				self.actors[e.player].action = { kind = kind, t = self.clock }
+			end
 		end
 	end
 
@@ -377,11 +380,23 @@ function World:step(dt, view)
 				dive = 1
 			end
 		end
+		-- 足技: ローカルは試合の技の情報、オンラインは同期された進み具合
+		local skill = nil
+		if type(pl.skill) == "table" and pl.skill.name then
+			skill = { name = pl.skill.name, u = (match.elapsed - pl.skill.t0) / pl.skill.dur }
+		elseif pl.skillAnim ~= nil then
+			skill = pl.skillAnim
+		end
+		local action = nil
+		if a.action ~= nil then
+			action = { kind = a.action.kind, age = self.clock - a.action.t }
+		end
 		Rig.pose(a.rig, {
 			pos = ground,
 			face = face,
 			speed = vel.Magnitude,
-			kickAge = self.clock - a.kickT,
+			action = action,
+			skill = skill,
 			slide = (pl.slide or 0) > 0,
 			stun = (pl.stun or 0) > 0,
 			dive = dive,

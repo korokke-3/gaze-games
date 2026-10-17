@@ -1091,6 +1091,100 @@ do
 	check("オンラインでも蹴った選手が分かる", idx ~= nil and m.pl[idx] == p, idx)
 end
 
+print("== 動作のイベント (アニメーション用) ==")
+do
+	local function kickTag(setup)
+		local m = Match.new({ random = lcg(601) })
+		clearOpponents(m)
+		local s = m:seat(1)
+		giveBall(m, s, { x = 30, y = 0 })
+		m.events = {}
+		setup(m)
+		for _, e in m.events do
+			if e.kind == "kick" then
+				return e.tag
+			end
+		end
+		return nil
+	end
+	check("パス = pass", kickTag(function(m)
+		m:setAim(1, 1, 0)
+		hold(m, 1, "pass", 0.2)
+	end) == "pass")
+	check("スルー = through", kickTag(function(m)
+		m:setAim(1, 1, 0)
+		hold(m, 1, "through", 0.2)
+	end) == "through")
+	check("浮き球 = lofted", kickTag(function(m)
+		m:setAim(1, 1, 0)
+		hold(m, 1, "lofted", 0.2)
+	end) == "lofted")
+	check("シュート = shot", kickTag(function(m)
+		m:setAim(1, 1, 0)
+		hold(m, 1, "shoot", 0.2)
+	end) == "shot")
+	check("L1 + シュート = loop", kickTag(function(m)
+		m:setAim(1, 1, 0)
+		m:press(1, "l1")
+		hold(m, 1, "shoot", 0.2)
+	end) == "loop")
+	-- スローイン
+	local m = Match.new({ random = lcg(602) })
+	m.ball.owner, m.ball.last = nil, m.teams[1][8]
+	m.ball.p = { x = 10, y = 33.9 }
+	m.ball.v = { x = 0, y = 6 }
+	m:update(1 / 30)
+	m.events = {}
+	m:setAim(1, 0, -1)
+	hold(m, 1, "pass", 0.3)
+	local throwTag = nil
+	for _, e in m.events do
+		if e.kind == "kick" then
+			throwTag = e.tag
+		end
+	end
+	check("スローイン = throw", throwTag == "throw", throwTag)
+	-- トラップ
+	local m2 = Match.new({ random = lcg(603), assist = 2 })
+	clearOpponents(m2)
+	local s2 = m2:seat(1)
+	giveBall(m2, s2, { x = 0, y = 0 })
+	m2.teams[0][7].p = { x = 10, y = 0 }
+	m2:setAim(1, 1, 0)
+	hold(m2, 1, "pass", 0.3)
+	local trapped = false
+	for _ = 1, 60 do
+		m2.events = {}
+		m2:update(1 / 30)
+		for _, e in m2.events do
+			if e.kind == "trap" and e.player ~= nil then
+				trapped = true
+			end
+		end
+		if trapped then
+			break
+		end
+	end
+	check("受けた選手のトラップ", trapped)
+	-- 技の進み具合を同期
+	local m3 = Match.new({ random = lcg(604) })
+	clearOpponents(m3)
+	local s3 = m3:seat(1)
+	local p3 = giveBall(m3, s3)
+	m3:startSkill(p3, "marseille", { x = 1, y = 0 }, { x = 0, y = 1 })
+	step(m3, 6)
+	local d = Snapshot.decode((Snapshot.encode(m3, 0)))
+	local idx
+	for i, p in m3.pl do
+		if p == p3 then
+			idx = i
+		end
+	end
+	local want = (m3.elapsed - p3.skill.t0) / p3.skill.dur
+	check("技の種類と進み具合を同期", d.pl[idx].skillName == "marseille" and math.abs(d.pl[idx].skillU - want) < 0.02, d.pl[idx].skillU)
+	check("1 回の送信が 400 バイト未満 (技の情報を足しても)", #Snapshot.encode(m3, 0) < 400, #Snapshot.encode(m3, 0))
+end
+
 print(("%d checks, %d failures"):format(checks, failures))
 if failures > 0 then
 	error("spec failed")

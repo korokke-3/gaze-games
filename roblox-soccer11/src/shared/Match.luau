@@ -372,8 +372,9 @@ function Match:popup(key, team)
 	table.insert(self.popups, { t = self.elapsed, key = key, team = team, seq = self.seq })
 end
 
-function Match:event(kind, player)
-	table.insert(self.events, { kind = kind, player = player })
+--- 効果音・動作のイベント。player = 動作した選手、tag = 動作の種類 (キックなら pass / shot / ...)
+function Match:event(kind, player, tag)
+	table.insert(self.events, { kind = kind, player = player, tag = tag })
 end
 
 -- ================================================================ 操作者 (シート)
@@ -1252,7 +1253,21 @@ function Match:kick(kind, o)
 	b.kickT = self.elapsed
 	b.p = vadd(c.p, vmul(vnorm(b.v), P_R + 0.3))
 	c.face = vnorm(b.v)
-	self:event("kick", c)
+	-- キックの種類 (見た目の動きに使う)
+	local tag = self.kickTag
+	self.kickTag = nil
+	if tag == nil then
+		if kind == "shot" then
+			tag = (o.style == "loop" and "loop") or (o.style == "header" and "header") or "shot"
+		elseif kind == "lofted" or kind == "lthrough" then
+			tag = "lofted"
+		elseif kind == "through" then
+			tag = "through"
+		else
+			tag = "pass"
+		end
+	end
+	self:event("kick", c, tag)
 	if kind == "shot" then
 		self:triggerDive(c)
 	end
@@ -1320,6 +1335,7 @@ function Match:tryTackle(p, rate, dt)
 	end
 	if vdist(b.p, p.p) < 1.3 and self:rand() < rate * dt then
 		p.cd = 0.9
+		self:event("steal", p) -- 足を出す
 		if self:rand() < 0.55 then
 			owner.stun = 0.5
 			self:gainBall(p)
@@ -1339,6 +1355,7 @@ function Match:shoulderOrClear(p)
 	p.cd = 0.7
 	if b.owner ~= nil and b.owner.team ~= p.team and b.owner.skill == nil then
 		if vdist(b.p, p.p) < 1.7 then
+			self:event("charge", p)
 			if self:rand() < 0.5 * p.attr.tackle then
 				b.owner.stun = 0.5
 				self:gainBall(p)
@@ -1354,7 +1371,7 @@ function Match:shoulderOrClear(p)
 		b.kickT = self.elapsed
 		b.kind, b.target, b.offside = "clear", nil, nil
 		self:popup("popup.clear", p.team)
-		self:event("kick")
+		self:event("kick", p, "lofted")
 	end
 end
 
@@ -1536,6 +1553,9 @@ function Match:takeSetpiece(s, btn, power, mods)
 		end
 		self:kick("shot", { c = taker, power = power, aimY = aimY })
 	else
+		if sp.kind == "throw" then
+			self.kickTag = "throw"
+		end
 		self:doKick(s, btn, power, mods or {})
 	end
 	if sp.kind == "throw" then
@@ -1575,6 +1595,9 @@ function Match:cpuSetpiece()
 	end
 	self.ball.owner = taker
 	self.setp = nil
+	if sp.kind == "throw" then
+		self.kickTag = "throw"
+	end
 	self:kick(how, { c = taker, target = best })
 	if sp.kind == "throw" then
 		self.ball.offside = nil
@@ -2373,7 +2396,7 @@ function Match:tryReceive()
 				if p.gk and not mine and b.kind == "shot" and sp > 14 and self:rand() < 0.3 and self.mode ~= "shootout" then
 					self.tstats[p.team].saves += 1
 					self:popup("popup.save", p.team)
-					self:event("save")
+					self:event("save", p)
 					local gsign = sgnOf(p.p.x)
 					b.v = { x = gsign * 5, y = (self:rand() < 0.5 and -1 or 1) * 8 }
 					b.z, b.vz = 0.6, 2
@@ -2386,7 +2409,7 @@ function Match:tryReceive()
 				if p.gk and not mine and b.kind == "shot" then
 					self.tstats[p.team].saves += 1
 					self:popup("popup.save", p.team)
-					self:event("save")
+					self:event("save", p)
 					if self.mode == "shootout" then
 						self:shootResult(false)
 					end
@@ -2396,6 +2419,9 @@ function Match:tryReceive()
 					self:shootResult(false)
 				end
 				p.run = nil
+				if not p.gk then
+					self:event("trap", p)
+				end
 				self:gainBall(p)
 				return
 			end
@@ -2493,6 +2519,7 @@ function Match:tryHeader(s, btn)
 		self:kick("shot", { c = c, power = 0.65, style = "header", aimY = aimY })
 	else
 		local recv = self:chooseReceiver(c, "pass", dir, 0.4)
+		self.kickTag = "header"
 		self:kick("pass", { c = c, dir = dir, power = 0.4, target = recv })
 	end
 	self:popup("popup.header", c.team)

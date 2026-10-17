@@ -301,6 +301,35 @@ local okV, errV = pcall(function()
 end)
 Check("対戦 (アウェイ側) を描画できる", okV, errV)
 
+-- 人型の全ての動作・技の姿勢 (計算が通ること)
+local Rig = Require(ClientRoot.Rig)
+local folder = Instance.new("Folder")
+local rig = Rig.new(folder, { shirt = Color3.new(1, 0, 0), shorts = Color3.new(0, 0, 0), skin = 3 })
+local okR, errR = pcall(function()
+	for kind in Rig.DURATION do
+		for _, u in { 0, 0.2, 0.5, 0.8, 1 } do
+			local parts, cfs = {}, {}
+			Rig.pose(rig, { pos = Vector3.new(0, 0, 0), face = Vector3.new(0, 0, -1), speed = 6, action = { kind = kind, age = u * Rig.DURATION[kind] } }, 1 / 30, parts, cfs)
+			assert(#parts == 6 and #cfs == 6)
+		end
+	end
+	for _, name in { "double_touch", "elastico", "scissors", "marseille", "drag_back" } do
+		for _, u in { 0, 0.3, 0.6, 1 } do
+			local parts, cfs = {}, {}
+			Rig.pose(rig, { pos = Vector3.new(0, 0, 0), face = Vector3.new(1, 0, 0), speed = 4, skill = { name = name, u = u } }, 1 / 30, parts, cfs)
+			assert(#parts == 6)
+		end
+	end
+	for _, extra in { { slide = true }, { dive = 1 }, { dive = -1 }, { stun = true }, { hidden = true } } do
+		local st = { pos = Vector3.new(0, 0, 0), face = Vector3.new(0, 0, 0), speed = 0 }
+		for k, x in extra do
+			st[k] = x
+		end
+		Rig.pose(rig, st, 1 / 30, {}, {})
+	end
+end)
+Check("人型の全ての動作・技の姿勢を計算できる", okR, errR)
+
 print(("== 結果: %d 失敗 =="):format(Failures))
 if Failures > 0 then
 	error("client smoke failed")

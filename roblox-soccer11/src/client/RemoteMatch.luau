@@ -102,7 +102,7 @@ function RemoteMatch:apply(str, now)
 		end
 	end
 	for _, e in snap.events do
-		table.insert(self.events, { kind = e.kind, player = e.index and self.pl[e.index] or nil })
+		table.insert(self.events, { kind = e.kind, player = e.index and self.pl[e.index] or nil, tag = e.tag })
 	end
 end
 
@@ -152,6 +152,7 @@ function RemoteMatch:advance(now)
 		p.stun = cur.stun and 1 or 0
 		p.slide = cur.slide and 1 or 0
 		p.skill = cur.skill and true or nil
+		p.skillAnim = cur.skillName and { name = cur.skillName, u = lerp(pa.skillU or 0, cur.skillU or 0, t) } or nil
 	end
 	self.ball.p = { x = lerp(sa.ball.x, sb.ball.x, t), y = lerp(sa.ball.y, sb.ball.y, t) }
 	self.ball.z = lerp(sa.ball.z, sb.ball.z, t)

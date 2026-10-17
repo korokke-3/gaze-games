@@ -15,6 +15,11 @@ local MODE_NAMES = { [0] = "play", "halftime", "replay", "shootout" }
 local SETP = { throw = 1, corner = 2, gk = 3, fk = 4, pk = 5 }
 local SETP_NAMES = { "throw", "corner", "gk", "fk", "pk" }
 local KICKS = { pass = 1, through = 2, lofted = 3, shoot = 4 }
+local SKILLS = { "double_touch", "elastico", "scissors", "marseille", "drag_back" }
+local SKILL_ID = {}
+for i, n in SKILLS do
+	SKILL_ID[n] = i
+end
 local KICK_NAMES = { "pass", "through", "lofted", "shoot" }
 
 Snapshot.BUTTONS = { "pass", "through", "lofted", "shoot", "dash", "l1", "r1", "l2" }
@@ -89,15 +94,23 @@ function Snapshot.encode(match, since)
 			+ (p.exhausted and 16 or 0)
 			+ (p.skill ~= nil and 32 or 0)
 			+ (p.dive ~= nil and 64 or 0)
+		-- 技の種類と進み具合 (足技の動きの同期用)
+		local sk, su = 0, 0
+		if p.skill ~= nil then
+			sk = SKILL_ID[p.skill.name] or 0
+			su = q(math.clamp((match.elapsed - p.skill.t0) / p.skill.dur, 0, 1), 255, 0, 255)
+		end
 		table.insert(
 			parts,
 			string.pack(
-				"<hhBBB",
+				"<hhBBBBB",
 				q(p.p.x, 50, -32768, 32767),
 				q(p.p.y, 50, -32768, 32767),
 				a,
 				q(p.stamina, 2.5, 0, 255),
-				f
+				f,
+				sk,
+				su
 			)
 		)
 	end
@@ -136,7 +149,11 @@ function Snapshot.encode(match, since)
 	for i = 1, math.min(#evs, 8) do
 		local e = evs[i]
 		local idx = e.player and indexOf(match, e.player) or 0
-		table.insert(parts, string.pack("<s1", idx > 0 and (e.kind .. ":" .. idx) or e.kind))
+		local raw = e.kind
+		if idx > 0 then
+			raw ..= ":" .. idx .. (e.tag and (":" .. e.tag) or "")
+		end
+		table.insert(parts, string.pack("<s1", raw))
 	end
 	return table.concat(parts), match.seq or 0
 end
@@ -168,7 +185,7 @@ function Snapshot.decode(str)
 	end
 	s.pl = {}
 	for i = 1, 22 do
-		local x, y, a, st, f = read("<hhBBB")
+		local x, y, a, st, f, sk, su = read("<hhBBBBB")
 		local ang = a / 256 * 2 * math.pi
 		s.pl[i] = {
 			x = x / 50,
@@ -183,6 +200,8 @@ function Snapshot.decode(str)
 			exhausted = bit32.band(f, 16) ~= 0,
 			skill = bit32.band(f, 32) ~= 0,
 			dive = bit32.band(f, 64) ~= 0,
+			skillName = SKILLS[sk],
+			skillU = su / 255,
 		}
 	end
 	s.seats = {}
@@ -204,9 +223,9 @@ function Snapshot.decode(str)
 	s.events = {}
 	for _ = 1, read("<B") do
 		local raw = read("<s1")
-		local kind, idx = string.match(raw, "^(%a+):(%d+)$")
+		local kind, idx, tag = string.match(raw, "^(%a+):(%d+):?(%a*)$")
 		if kind then
-			table.insert(s.events, { kind = kind, index = tonumber(idx) })
+			table.insert(s.events, { kind = kind, index = tonumber(idx), tag = tag ~= "" and tag or nil })
 		else
 			table.insert(s.events, { kind = raw })
 		end
