@@ -138,6 +138,13 @@ for _, d in PlayerGui:GetDescendants() do
 	end
 end
 Check("指の凡例が出る", fingerLabel)
+local skillHelp = false
+for _, d in PlayerGui:GetDescendants() do
+	if d._p.ClassName == "TextLabel" and d._p.Text == "Sideways, then the other side" then
+		skillHelp = true
+	end
+end
+Check("技の出し方が出る", skillHelp)
 local slot = FindButton("L-Click")
 Check("パスの枠 (L-Click) がある", slot ~= nil)
 slot.fn()

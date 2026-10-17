@@ -1571,11 +1571,30 @@ function Match:cpuSetpiece()
 	if sp == nil then
 		return
 	end
-	local wait = self:human(sp.team) and CTRL.SetpieceAutoTake or 1.3
-	if self.elapsed - sp.t0 < wait then
+	local dg = vdist(self.ball.p, self:oppGoal(sp.team))
+	-- CPU: 最低限の間を置き、配置がそろったら蹴る (そろわなくても上限で蹴る)
+	local minWait = ({ corner = 1.5, fk = dg < 35 and 1.5 or 0.8, throw = 0.8, gk = 1.0, pk = 1.8 })[sp.kind] or 1.0
+	local maxWait = ({ corner = 7, fk = dg < 35 and 7 or 3, throw = 3, gk = 4, pk = 1.8 })[sp.kind] or 3
+	local waited = self.elapsed - sp.t0
+	if self:human(sp.team) then
+		if waited < CTRL.SetpieceAutoTake then
+			return
+		end
+	elseif waited < minWait or (waited < maxWait and not sp.ready) then
 		return
 	end
 	local taker = sp.taker
+	-- ゴール前の FK: 半分くらいは直接狙う (壁の外側、ファーサイドへ)
+	if sp.kind == "fk" and dg < 30 and self:rand() < 0.5 then
+		self.ball.owner = taker
+		self.setp = nil
+		local far = -sgnOf(self.ball.p.y)
+		if far == 0 then
+			far = self:choice({ -1, 1 })
+		end
+		self:kick("shot", { c = taker, power = self:uniform(0.75, 0.9), aimY = far * self:uniform(1.8, 3.2), curl = far })
+		return
+	end
 	if sp.kind == "pk" then
 		self.ball.owner = taker
 		self.setp = nil
@@ -1583,10 +1602,13 @@ function Match:cpuSetpiece()
 		self:kick("shot", { c = taker, power = 0.8, aimY = sign * self:uniform(1.5, 3.2) })
 		return
 	end
-	local how = (sp.kind == "corner" or sp.kind == "gk") and "lofted" or "pass"
+	local how = (sp.kind == "corner" or sp.kind == "gk" or (sp.kind == "fk" and dg < 35)) and "lofted" or "pass"
+	local toBox = sp.kind == "corner" or (sp.kind == "fk" and dg < 35)
+	local sA = self:sgn(sp.team)
 	local best, bs = nil, -1e9
 	for _, m in self:active(sp.team) do
-		if m ~= taker then
+		local inBox = sA * m.p.x > PL / 2 - BOX_L and math.abs(m.p.y) < BOX_W / 2
+		if m ~= taker and (not toBox or inBox) then
 			local sc = self:laneClear(taker.p, m.p, sp.team) - 0.02 * vdist(m.p, taker.p)
 			if sc > bs then
 				best, bs = m, sc
@@ -1601,6 +1623,224 @@ function Match:cpuSetpiece()
 	self:kick(how, { c = taker, target = best })
 	if sp.kind == "throw" then
 		self.ball.offside = nil
+	end
+end
+
+-- ================================================================ セットプレーの配置
+-- ゴール前で入る位置 (攻撃方向の座標: x = 相手ゴールへ向かって +、y = 実際の横位置。cy = コーナー側)
+local BOX_SLOTS = {
+	{ x = PL / 2 - 5, y = 3.5 }, -- ニアポスト
+	{ x = PL / 2 - 6, y = -3.0 }, -- ファーポスト
+	{ x = PL / 2 - 10.5, y = 0 }, -- PK スポット
+	{ x = PL / 2 - 7.5, y = -0.5 }, -- 中央
+	{ x = PL / 2 - 13, y = 6 }, -- 手前
+	{ x = PL / 2 - 19, y = 0 }, -- エリアの外 (こぼれ球)
+}
+-- ゴール前に入れる順番 (前線と CB を優先)
+local BOX_PRIORITY = { ST = 0, CF = 0, CB = 1, CAM = 2, CM = 2, DM = 3, LW = 3, RW = 3, LM = 3, RM = 3 }
+
+--- そのチームの、蹴る人と GK 以外の選手。
+function Match:fieldPlayers(team, except)
+	local out = {}
+	for _, p in self:active(team) do
+		if p ~= except and not p.gk then
+			table.insert(out, p)
+		end
+	end
+	return out
+end
+
+--- 位置のリスト slots に、選手を近い順に割り当てる (貪欲法)。戻り値: player -> 位置
+local function assignSlots(players, slots)
+	local out = {}
+	local free = table.clone(players)
+	for _, slot in slots do
+		local best, bd, bi = nil, math.huge, nil
+		for i, p in free do
+			local d = vdist(p.p, slot)
+			if d < bd then
+				best, bd, bi = p, d, i
+			end
+		end
+		if best == nil then
+			break
+		end
+		out[best] = slot
+		table.remove(free, bi)
+	end
+	return out, free
+end
+
+--- セットプレーの配置 (蹴るまでの間、全員がこの位置へ動く)。
+function Match:setpieceTargets()
+	local sp = self.setp
+	local b = self.ball
+	local A = sp.team
+	local D = 1 - A
+	local sA = self:sgn(A)
+	local goal = { x = sA * PL / 2, y = 0 } -- A が攻めるゴール
+	local tg = self:shapeTargets(A)
+	local function att(x, y)
+		return { x = sA * x, y = y }
+	end
+	local function keepAway(team, radius)
+		for _, p in self:active(team) do
+			local t = tg[p] or p.p
+			local d = vsub(t, b.p)
+			if vlen(d) < radius and not p.gk then
+				local dir = vlen(d) > 0.1 and vnorm(d) or vnorm(vsub(vmul(goal, -1), b.p))
+				tg[p] = vadd(b.p, vmul(dir, radius))
+			end
+		end
+	end
+	--- 攻撃側をゴール前に入れ、守備側にマークさせる
+	local function boxPlay(cy, nAttackers)
+		local cands = self:fieldPlayers(A, sp.taker)
+		table.sort(cands, function(a, c)
+			return (BOX_PRIORITY[a.role] or 4) < (BOX_PRIORITY[c.role] or 4)
+		end)
+		local chosen = {}
+		for i = 1, math.min(nAttackers, #cands) do
+			table.insert(chosen, cands[i])
+		end
+		local slots = {}
+		for i = 1, #chosen do
+			local s0 = BOX_SLOTS[i]
+			table.insert(slots, att(s0.x, s0.y * cy))
+		end
+		local placed = assignSlots(chosen, slots)
+		for p, pos in placed do
+			tg[p] = pos
+		end
+		-- 守備側: GK はライン上、1 人ニアポスト、他は攻撃側をゴール側からマーク
+		local gk = self:slot(D, 0)
+		if gk ~= nil and gk.gk then
+			tg[gk] = att(PL / 2 - 0.6, cy * 1.0)
+		end
+		local defs = self:fieldPlayers(D, nil)
+		local nearPost = att(PL / 2 - 1, cy * 3.2)
+		local np = assignSlots(defs, { nearPost })
+		local rest = {}
+		for _, q in defs do
+			if np[q] == nil then
+				table.insert(rest, q)
+			else
+				tg[q] = nearPost
+			end
+		end
+		local marks = {}
+		for p, pos in placed do
+			table.insert(marks, vadd(pos, { x = sA * 1.0, y = 0 }))
+		end
+		local mk, left = assignSlots(rest, marks)
+		for q, pos in mk do
+			tg[q] = pos
+		end
+		-- 残り: 1 人はカウンター用に前へ、他はエリアの手前
+		for i, q in left do
+			if i == 1 then
+				tg[q] = att(PL / 2 - 52, 0)
+			else
+				tg[q] = att(PL / 2 - 21, (i - 2) * 8 - 8)
+			end
+		end
+	end
+
+	if sp.kind == "corner" then
+		boxPlay(sgnOf(b.p.y) ~= 0 and sgnOf(b.p.y) or 1, 6)
+		keepAway(D, 9.15)
+	elseif sp.kind == "fk" then
+		local dg = vdist(b.p, goal)
+		if dg < 35 then
+			-- ゴール前の FK: 攻撃側はゴール前へ、守備側は壁とマーク
+			boxPlay(b.p.y >= 0 and 1 or -1, 4)
+			local dir = vnorm(vsub(goal, b.p))
+			local perp = { x = -dir.y, y = dir.x }
+			local n = dg < 22 and 5 or (dg < 28 and 4 or 3)
+			local center = vadd(b.p, vmul(dir, 9.15))
+			local wall = {}
+			for k = 1, n do
+				table.insert(wall, vadd(center, vmul(perp, (k - (n + 1) / 2) * 0.75)))
+			end
+			local defs = self:fieldPlayers(D, nil)
+			local placed = assignSlots(defs, wall)
+			for q, pos in placed do
+				tg[q] = pos
+			end
+		else
+			keepAway(D, 9.15)
+		end
+	elseif sp.kind == "throw" then
+		-- スローイン: 近くの 2 人が受けに寄る。相手は 2m 離れる
+		local inward = { x = 0, y = -sgnOf(b.p.y) }
+		local opts = {
+			vadd(b.p, vadd(vmul(inward, 3), { x = sA * 9, y = 0 })),
+			vadd(b.p, vmul(inward, 10)),
+		}
+		local placed = assignSlots(self:fieldPlayers(A, sp.taker), opts)
+		for p, pos in placed do
+			tg[p] = pos
+		end
+		keepAway(D, 2.5)
+	elseif sp.kind == "gk" then
+		-- ゴールキック: 相手はペナルティエリアの外へ
+		for _, q in self:active(D) do
+			if not q.gk then
+				local t = tg[q] or q.p
+				local ownX = -sA * PL / 2 -- A の自陣ゴール (= ボールのある側)
+				if math.abs(t.x - ownX) < BOX_L + 1 and math.abs(t.y) < BOX_W / 2 + 1 then
+					tg[q] = { x = ownX + sA * (BOX_L + 2), y = t.y }
+				end
+			end
+		end
+	elseif sp.kind == "pk" then
+		for _, p in self.pl do
+			if not p.gk and p ~= sp.taker then
+				tg[p] = { x = clamp(p.p.x, -PL / 2 + BOX_L + 1, PL / 2 - BOX_L - 1), y = p.p.y }
+			end
+		end
+	end
+	return tg
+end
+
+--- セットプレー中: 蹴る人以外が配置へ動く (ボールは止まったまま)。
+function Match:moveForSetpiece(dt)
+	local sp = self.setp
+	local b = self.ball
+	local tg = self:setpieceTargets()
+	local placed, total = 0, 0
+	for _, p in self.pl do
+		if not p.out and p ~= sp.taker and tg[p] ~= nil then
+			total += 1
+			if vdist(p.p, tg[p]) < 2.5 then
+				placed += 1
+			end
+		end
+	end
+	sp.ready = total == 0 or placed / total >= 0.8 -- 8 割が配置に着いた
+	for _, p in self.pl do
+		if p.out then
+			continue
+		end
+		if p == sp.taker then
+			p.v = { x = 0, y = 0 }
+		else
+			local target = tg[p] or p.p
+			local v = vsub(target, p.p)
+			local dist = vlen(v)
+			local top = Match.aiSpeed(dist, dist > 6) * self:speedMult(p)
+			Match.steer(p, vmul(vnorm(v), top), ACC_AI, dt)
+			p.p.x = clamp(p.p.x + p.v.x * dt, -PL / 2 - 2, PL / 2 + 2)
+			p.p.y = clamp(p.p.y + p.v.y * dt, -PW / 2 - 2, PW / 2 + 2)
+			-- ボールの方を向いて待つ
+			local d = vsub(b.p, p.p)
+			if vlen(d) > 0.5 and dist < 1.5 then
+				p.face = vnorm(d)
+			elseif vlen(p.v) > 0.3 then
+				p.face = vnorm(p.v)
+			end
+		end
+		self:updateStamina(p, dt)
 	end
 end
 
@@ -1629,10 +1869,12 @@ function Match:steering(p)
 end
 
 --- チームの陣形と、守備の寄せ役 (操作中の選手以外の AI が必ず 1 人寄せる)。
-function Match:shapeTargets()
+function Match:shapeTargets(attOverride)
 	local b = self.ball
 	local att = HOME
-	if b.owner ~= nil then
+	if attOverride ~= nil then
+		att = attOverride
+	elseif b.owner ~= nil then
 		att = b.owner.team
 	elseif b.last ~= nil then
 		att = b.last.team
@@ -2045,12 +2287,15 @@ function Match:update(dtRaw)
 	end
 	if self.setp ~= nil then
 		self:cpuSetpiece()
+		if self.setp ~= nil then
+			self:moveForSetpiece(dt)
+		end
 		return
 	end
-	-- 右スティックの技: 最後に弾いてから 0.18 秒で確定
+	-- 右スティックの技: 最後に弾いてから SkillWindow 秒で確定 (続けて弾けばコンビネーション)
 	for _, s in self.seats do
 		local lastIn = s.rsBuf[#s.rsBuf]
-		if lastIn ~= nil and self.elapsed - lastIn.t > 0.18 then
+		if lastIn ~= nil and self.elapsed - lastIn.t > CTRL.SkillWindow then
 			if self:attacking(s) and s.ctrl.skill == nil then
 				local name, f, side = self:matchSkill(s)
 				if name ~= nil then

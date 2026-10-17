@@ -1185,6 +1185,141 @@ do
 	check("1 回の送信が 400 バイト未満 (技の情報を足しても)", #Snapshot.encode(m3, 0) < 400, #Snapshot.encode(m3, 0))
 end
 
+print("== セットプレーの配置 ==")
+do
+	local function inBox(p, goalSign)
+		return goalSign * p.p.x > 52.5 - 16.5 and math.abs(p.p.y) < 40.3 / 2
+	end
+	--- セットプレーが蹴られる直前まで進め、その時の状態を f で調べる
+	local function untilKick(m, maxSec, f)
+		local last = nil
+		for _ = 1, math.floor(maxSec * 30) do
+			if m.setp == nil then
+				break
+			end
+			last = f(m)
+			m:update(1 / 30)
+		end
+		return last
+	end
+	-- コーナー: HOME の攻撃 (+x のゴール)。キックオフの配置から (遠い所から集まる)
+	local m = Match.new(cpuOpts(701))
+	m:startSetpiece("corner", 0, { x = 52, y = 33.5 }, "setp.corner")
+	step(m, 30 * 1)
+	check("コーナーはすぐには蹴らない (配置を待つ)", m.setp ~= nil)
+	local res = untilKick(m, 9, function(mm)
+		local att, def, near = 0, 0, math.huge
+		for _, p in mm:active(0) do
+			if not p.gk and p ~= mm.setp.taker and inBox(p, 1) then
+				att += 1
+			end
+		end
+		for _, p in mm:active(1) do
+			if not p.gk and inBox(p, 1) then
+				def += 1
+			end
+			near = math.min(near, math.sqrt((p.p.x - 52) ^ 2 + (p.p.y - 33.5) ^ 2))
+		end
+		return { att = att, def = def, near = near, gk = mm:slot(1, 0).p.x, t = mm.elapsed }
+	end)
+	check("コーナーで攻撃側がゴール前に 4 人以上", res.att >= 4, res.att)
+	check("守備側もゴール前でマーク (4 人以上)", res.def >= 4, res.def)
+	check("相手 GK はゴールライン上", res.gk > 50, res.gk)
+	check("守備側はボールから 9.15m 離れる", res.near > 8.5, res.near)
+	check("配置がそろったら蹴る (上限 7 秒以内)", m.setp == nil and res.t < 8, res.t)
+
+	-- ゴール前の FK: 壁
+	local m2 = Match.new(cpuOpts(702))
+	for _, p in m2.pl do
+		if not p.gk then
+			p.p = { x = 52.5 - 30, y = p.p.y * 0.4 } -- ゴール前で起きたファウル
+		end
+	end
+	m2:startSetpiece("fk", 0, { x = 52.5 - 22, y = 4 }, "popup.foul_fk")
+	local wall = untilKick(m2, 8, function(mm)
+		local w = 0
+		for _, p in mm:active(1) do
+			local d = math.sqrt((p.p.x - (52.5 - 22)) ^ 2 + (p.p.y - 4) ^ 2)
+			if not p.gk and d > 8 and d < 10.5 and p.p.x > 52.5 - 22 then
+				w += 1
+			end
+		end
+		return w
+	end)
+	check("ゴール前の FK で 3 人以上の壁 (ボールから 9.15m、ゴール側)", wall >= 3, wall)
+
+	-- スローイン: 近くに受け手
+	local m3 = Match.new(cpuOpts(703))
+	m3:startSetpiece("throw", 0, { x = 0, y = 33.7 }, "setp.throw")
+	local helpers = untilKick(m3, 4, function(mm)
+		local h = 0
+		for _, p in mm:active(0) do
+			if p ~= mm.setp.taker and math.sqrt(p.p.x ^ 2 + (p.p.y - 33.7) ^ 2) < 14 then
+				h += 1
+			end
+		end
+		return h
+	end)
+	check("スローインで受け手が寄る", helpers >= 1, helpers)
+
+	-- ゴールキック: 相手はエリアの外
+	local m4 = Match.new(cpuOpts(704))
+	for _, p in m4.teams[1] do
+		p.p = { x = -45, y = p.p.y * 0.3 }
+	end
+	m4:startSetpiece("gk", 0, { x = -52.5 + 5.5, y = 4 }, "setp.gk")
+	local inside = untilKick(m4, 5, function(mm)
+		local n = 0
+		for _, p in mm:active(1) do
+			if not p.gk and p.p.x < -52.5 + 16.5 and math.abs(p.p.y) < 40.3 / 2 then
+				n += 1
+			end
+		end
+		return n
+	end)
+	check("ゴールキックで相手はエリアの外へ出る", inside <= 1, inside)
+
+	-- 人間のチームは配置を待たずに蹴ってもよい (クイックリスタート)
+	local m5 = Match.new({ random = lcg(705) })
+	m5:startSetpiece("fk", 0, { x = 0, y = 0 }, "popup.foul_fk")
+	m5:setAim(1, 1, 0)
+	hold(m5, 1, "pass", 0.2)
+	check("人間はすぐに蹴れる", m5.setp == nil)
+end
+
+print("== 足技のコンビネーション (PC の 2 回押しの間隔) ==")
+do
+	local function skillAfter(flicks, gap)
+		local m = Match.new({ random = lcg(801) })
+		clearOpponents(m)
+		local s = m:seat(1)
+		local p = giveBall(m, s, { x = 0, y = 0 })
+		p.face = { x = 1, y = 0 }
+		p.v = { x = 0, y = 0 }
+		local got = nil
+		for i, f in flicks do
+			m:flick(1, f[1], f[2])
+			if i < #flicks then
+				step(m, math.floor(gap * 30))
+			end
+		end
+		for _ = 1, 20 do
+			m:update(1 / 30)
+			if p.skill ~= nil then
+				got = p.skill.name
+				break
+			end
+		end
+		return got
+	end
+	-- 右向きでドリブル中: 横 = 上下、前 = 右、後ろ = 左
+	check("横 1 回 = ダブルタッチ", skillAfter({ { 0, -1 } }, 0) == "double_touch")
+	check("後ろ 1 回 = ドラッグバック", skillAfter({ { -1, 0 } }, 0) == "drag_back")
+	check("横 → 反対の横 (0.25 秒間隔) = エラシコ", skillAfter({ { 0, -1 }, { 0, 1 } }, 0.25) == "elastico", skillAfter({ { 0, -1 }, { 0, 1 } }, 0.25))
+	check("前 → 横 (0.25 秒間隔) = シザーズ", skillAfter({ { 1, 0 }, { 0, 1 } }, 0.25) == "scissors")
+	check("前 → 後ろ → 横 (0.25 秒間隔) = マルセイユ", skillAfter({ { 1, 0 }, { -1, 0 }, { 0, 1 } }, 0.25) == "marseille")
+end
+
 print(("%d checks, %d failures"):format(checks, failures))
 if failures > 0 then
 	error("spec failed")

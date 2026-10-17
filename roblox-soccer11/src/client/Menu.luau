@@ -612,6 +612,7 @@ function Menu:_renderControls()
 	if self.ctrlDevice == "kb" then
 		self:_fingerMap(b)
 	end
+	self:_skillHelp(b)
 	if self.ctrlDevice == "pad" then
 		label(self.scroll, t("controls.padonly"), {
 			Size = UDim2.new(1, 0, 0, 22),
@@ -665,6 +666,50 @@ function Menu:_renderControls()
 				end)
 			end
 		end
+	end
+end
+
+--- 技の出し方 (進行方向に対して弾く向き)。キーボードは移動キーの 2 回押し、パッドは右スティック。
+function Menu:_skillHelp(b)
+	local t = function(k, ...)
+		return Locale.t(self.lang, k, ...)
+	end
+	self:_header(t("skillhelp.title"))
+	local up = Bindings.display(b.kb.moveUp and b.kb.moveUp[1])
+	local right = Bindings.display(b.kb.moveRight and b.kb.moveRight[1])
+	label(self.scroll, t(self.ctrlDevice == "pad" and "skillhelp.how.pad" or "skillhelp.how.kb"), {
+		Size = UDim2.new(1, 0, 0, 36),
+		TextSize = 14,
+		TextWrapped = true,
+		TextColor3 = Color3.fromRGB(200, 230, 210),
+		LayoutOrder = nextOrder(),
+		ZIndex = 32,
+	})
+	for _, name in { "double_touch", "elastico", "scissors", "marseille", "drag_back" } do
+		local row = self:_row(34)
+		label(row, t("skill." .. name), {
+			Position = UDim2.fromOffset(12, 0),
+			Size = UDim2.new(0.4, -12, 1, 0),
+			TextSize = 15,
+			ZIndex = 33,
+		})
+		label(row, t("skillhelp." .. name), {
+			Position = UDim2.new(0.4, 0, 0, 0),
+			Size = UDim2.new(0.6, -12, 1, 0),
+			TextSize = 15,
+			TextColor3 = Color3.fromRGB(255, 230, 150),
+			ZIndex = 33,
+		})
+	end
+	if self.ctrlDevice ~= "pad" then
+		label(self.scroll, t("skillhelp.example", right, up), {
+			Size = UDim2.new(1, 0, 0, 22),
+			TextSize = 14,
+			TextWrapped = true,
+			TextColor3 = Color3.fromRGB(180, 200, 190),
+			LayoutOrder = nextOrder(),
+			ZIndex = 32,
+		})
 	end
 end
 

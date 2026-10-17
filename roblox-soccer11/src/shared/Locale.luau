@@ -188,7 +188,7 @@ local EN = {
 	["guide.dash"] = "Dash / hold while kicking = strong kick",
 	["guide.l1"] = "One-two / chipped through / chip shot",
 	["guide.r1"] = "Controlled shot / pass and go",
-	["guide.feint"] = "Feint: double-tap a direction",
+	["guide.feint"] = "Feints: double-tap a direction (sideways = double touch)",
 	["guide.pressure"] = "Pressure (hold)",
 	["guide.matchup"] = "Match-up (hold)",
 	["guide.callpress"] = "Call a 2nd presser (hold)",
@@ -303,6 +303,15 @@ local EN = {
 	["short.levelDown"] = "Defence lv",
 	["short.pause"] = "Pause",
 	["short.help"] = "Guide",
+	["skillhelp.title"] = "Skill moves (directions are relative to where you are running)",
+	["skillhelp.how.kb"] = "Double-tap a movement key quickly = one flick. For combos, do the next double-tap right after.",
+	["skillhelp.how.pad"] = "Flick the right stick. For combos, flick again right after.",
+	["skillhelp.double_touch"] = "Sideways once",
+	["skillhelp.elastico"] = "Sideways, then the other side",
+	["skillhelp.scissors"] = "Forward, then sideways",
+	["skillhelp.marseille"] = "Forward, back, then sideways",
+	["skillhelp.drag_back"] = "Back once",
+	["skillhelp.example"] = "Example: dribbling right (%s), tap %s twice quickly = double touch upward.",
 }
 
 local JA = {
@@ -487,7 +496,7 @@ local JA = {
 	["guide.dash"] = "ダッシュ / 押しながら蹴ると強いキック",
 	["guide.l1"] = "ワンツー / ループスルー / ループシュート",
 	["guide.r1"] = "コントロールシュート / パス&ゴー",
-	["guide.feint"] = "フェイント: 方向を 2 回押し",
+	["guide.feint"] = "フェイント: 方向を 2 回押し (横 = ダブルタッチ)",
 	["guide.pressure"] = "プレッシャー (長押し)",
 	["guide.matchup"] = "マッチアップ (長押し)",
 	["guide.callpress"] = "2 人目のプレス (長押し)",
@@ -602,6 +611,15 @@ local JA = {
 	["short.levelDown"] = "守備Lv",
 	["short.pause"] = "一時停止",
 	["short.help"] = "ガイド",
+	["skillhelp.title"] = "技の出し方 (向きは、走っている向きに対して)",
+	["skillhelp.how.kb"] = "移動キーを素早く 2 回押す = 1 回弾く。続けて出す技は、すぐ次の 2 回押しを入れる。",
+	["skillhelp.how.pad"] = "右スティックを弾く。続けて出す技は、すぐ次を弾く。",
+	["skillhelp.double_touch"] = "横に 1 回",
+	["skillhelp.elastico"] = "横 → 反対の横",
+	["skillhelp.scissors"] = "前 → 横",
+	["skillhelp.marseille"] = "前 → 後ろ → 横",
+	["skillhelp.drag_back"] = "後ろに 1 回",
+	["skillhelp.example"] = "例: 右 (%s) へドリブル中に %s を素早く 2 回 → 上へダブルタッチ",
 }
 
 Locale.Tables = { en = EN, ja = JA }
