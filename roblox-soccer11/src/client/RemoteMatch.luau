@@ -102,7 +102,7 @@ function RemoteMatch:apply(str, now)
 		end
 	end
 	for _, e in snap.events do
-		table.insert(self.events, e)
+		table.insert(self.events, { kind = e.kind, player = e.index and self.pl[e.index] or nil })
 	end
 end
 

@@ -372,8 +372,8 @@ function Match:popup(key, team)
 	table.insert(self.popups, { t = self.elapsed, key = key, team = team, seq = self.seq })
 end
 
-function Match:event(kind)
-	table.insert(self.events, { kind = kind })
+function Match:event(kind, player)
+	table.insert(self.events, { kind = kind, player = player })
 end
 
 -- ================================================================ 操作者 (シート)
@@ -654,6 +654,14 @@ function Match:release(id, btn)
 		return
 	end
 	s.charge = nil
+	if ch.curl == nil and self.setp ~= nil and vlen(s.move) > CTRL.DeadZone then
+		-- セットプレーの溜め中に横へ入力していたらカーブ (狙いに対して左右)
+		local aim = self:aimOf(s)
+		local side = vdot(s.move, { x = -aim.y, y = aim.x })
+		if math.abs(side) > 0.4 then
+			ch.curl = sgnOf(side)
+		end
+	end
 	ch.mods.curl = ch.curl
 	local power = clamp((self.elapsed - ch.t0) / CTRL.GaugeTime, 0, 1)
 	local p = s.ctrl
@@ -1244,7 +1252,7 @@ function Match:kick(kind, o)
 	b.kickT = self.elapsed
 	b.p = vadd(c.p, vmul(vnorm(b.v), P_R + 0.3))
 	c.face = vnorm(b.v)
-	self:event("kick")
+	self:event("kick", c)
 	if kind == "shot" then
 		self:triggerDive(c)
 	end
@@ -1316,7 +1324,7 @@ function Match:tryTackle(p, rate, dt)
 			owner.stun = 0.5
 			self:gainBall(p)
 			self:popup("popup.steal", p.team)
-		elseif self:rand() < 0.2 then
+		elseif self:rand() < 0.12 then
 			self:foul(p, owner, 0.4)
 		end
 	end
@@ -1643,9 +1651,15 @@ function Match:shapeTargets()
 			end
 		end
 	end
-	-- 守備側の寄せ: 操作中で入力のある選手以外から、近い順に 1 人 (2 人目のプレス / レベル高なら 2 人)
+	-- 守備側の寄せ (間合いを取って構え、時々踏み込む。背後から追い回さない)
+	--   寄せ役: ゴール側にいる選手を優先。自陣ゴールに近いほど間合いを詰める
+	--   2 人目: 寄せ役の後ろ (ゴール側) でカバー。R1 / 攻守レベル最大なら 2 人目も寄せる
+	self.pressInfo = {}
 	for team = HOME, AWAY do
 		if att ~= team and b.owner ~= nil then
+			local owner = b.owner
+			local ownGoal = vmul(self:oppGoal(team), -1)
+			local toGoal = vnorm(vsub(ownGoal, owner.p))
 			local defs = {}
 			for _, p in self:active(team) do
 				if not p.gk and self:aiDriven(p) then
@@ -1653,32 +1667,51 @@ function Match:shapeTargets()
 				end
 			end
 			table.sort(defs, function(a, c)
-				return vdist(a.p, b.p) < vdist(c.p, b.p)
+				return self:defendScore(a) < self:defendScore(c)
 			end)
 			local cur = self.presser[team]
-			local near = defs[1]
-			if cur == nil or table.find(defs, cur) == nil or (near ~= nil and vdist(near.p, b.p) < vdist(cur.p, b.p) - 3.0) then
-				cur = near
-			end
-			self.presser[team] = cur
-			if cur ~= nil then
-				tg[cur] = vadd(b.p, vmul(b.owner.v, 0.3))
-			end
-			local extra = 0
-			for _, st in self.seats do
-				if st.team == team and st.buttons.r1 then
-					extra = 1 -- 2 人目のプレスを呼ぶ
+			local best = defs[1]
+			if cur == nil or table.find(defs, cur) == nil or (best ~= nil and self:defendScore(best) < self:defendScore(cur) - 4.0) then
+				cur = best
+				if cur ~= nil then
+					cur.nextCommit = self.elapsed + self:uniform(0.8, 1.6)
 				end
 			end
-			if self.level[team] >= 2 then
-				extra = math.max(extra, 1)
+			self.presser[team] = cur
+			local press = TACTICS.Press[self.tactics[team].press] + self.level[team] * 0.15
+			if cur ~= nil then
+				local dg = vdist(owner.p, ownGoal)
+				local gap = (dg < 30 and 1.3 or (dg < 60 and 2.2 or 3.4)) / math.max(press, 0.5)
+				gap = clamp(gap, 1.0, 4.5)
+				if self.elapsed >= (cur.nextCommit or 0) then
+					local rate = press * (self:isCpuTeam(team) and self.diff.aiTackle or 1)
+					cur.commitUntil = self.elapsed + 0.55
+					cur.nextCommit = self.elapsed + 0.55 + self:uniform(1.2, 2.6) / math.max(rate, 0.3)
+				end
+				if self.elapsed < (cur.commitUntil or -1) and vdist(cur.p, owner.p) < gap + 2.5 then
+					tg[cur] = vadd(vadd(owner.p, vmul(toGoal, 1.0)), vmul(owner.v, 0.15)) -- ゴール側からボールへ足を出す
+					self.pressInfo[cur] = "commit"
+				else
+					tg[cur] = vadd(vadd(owner.p, vmul(toGoal, gap)), vmul(owner.v, 0.25)) -- 構える
+					self.pressInfo[cur] = "contain"
+				end
 			end
-			if extra > 0 then
-				for _, p in defs do
-					if p ~= cur then
-						tg[p] = { x = b.p.x, y = b.p.y }
-						break
+			local extra = self.level[team] >= 2
+			for _, st in self.seats do
+				if st.team == team and st.buttons.r1 then
+					extra = true
+				end
+			end
+			for _, p in defs do
+				if p ~= cur then
+					if extra then
+						tg[p] = vadd(owner.p, vmul(toGoal, 1.2))
+						self.pressInfo[p] = "commit"
+					else
+						tg[p] = vadd(owner.p, vmul(toGoal, 7))
+						self.pressInfo[p] = "cover"
 					end
+					break
 				end
 			end
 		end
@@ -2052,17 +2085,30 @@ function Match:update(dtRaw)
 			else
 				p.run = nil
 				target = tg[p]
-				if p == self.presser[p.team] then
+				local mode = self.pressInfo and self.pressInfo[p]
+				if mode == "commit" then
 					urgent = true
+				elseif mode == "contain" and target ~= nil and vdist(target, p.p) > 4 then
+					urgent = true -- 間合いまでは急いで戻る / 詰める
 				end
 			end
 			target = target or p.p
 			local v = vsub(target, p.p)
 			local dist = vlen(v)
 			local top = Match.aiSpeed(dist, urgent) * self:speedMult(p) * self:teamSpeed(p.team)
+			local mode = self.pressInfo and self.pressInfo[p]
+			if mode == "contain" and b.owner ~= nil and dist < 4 then
+				-- 構えている間は、保持者の速さに合わせて下がる・寄る (置いていかれない程度)
+				top = math.max(top, math.min(vlen(b.owner.v) * 1.05, DASH))
+			end
 			Match.steer(p, vmul(vnorm(v), top), ACC_AI, dt)
-			if b.owner ~= nil and b.owner.team ~= p.team and dist < 1.6 then
-				self:tryTackle(p, p.seat == nil and 1.0 or 0.6, dt)
+			if b.owner ~= nil and b.owner.team ~= p.team then
+				local bd = vdist(p.p, b.p)
+				if mode == "commit" and bd < 1.6 then
+					self:tryTackle(p, 1.5, dt) -- 踏み込んだ時に奪いに行く
+				elseif bd < 1.1 then
+					self:tryTackle(p, p.seat == nil and 0.6 or 0.4, dt) -- 目の前に来たボールに足を出す
+				end
 			end
 		end
 		self:updateStamina(p, dt)
@@ -2071,6 +2117,14 @@ function Match:update(dtRaw)
 			p.p.y = clamp(p.p.y + p.v.y * dt, -PW / 2 - 2, PW / 2 + 2)
 			if vlen(p.v) > 0.3 and p.slide <= 0 and p.skill == nil then
 				p.face = vnorm(p.v)
+			end
+			-- 寄せている守備者は、下がりながらでも保持者の方を向く
+			local mode = self.pressInfo and self.pressInfo[p]
+			if (mode == "contain" or mode == "commit") and b.owner ~= nil and p.slide <= 0 then
+				local d = vsub(b.owner.p, p.p)
+				if vlen(d) < 8 and vlen(d) > 0.1 then
+					p.face = vnorm(d)
+				end
 			end
 		end
 	end

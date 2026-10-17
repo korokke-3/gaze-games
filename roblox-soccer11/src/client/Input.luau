@@ -12,7 +12,8 @@
 	  左クリック = × (パス / プレッシャー)  右クリック = □ (シュート / ショルダーチャージ)
 	  Space or ホイールクリック = △ (スルー / GK 飛び出し)  E = ○ (浮き球・クロス / スライディング)
 	  Q = L1 (修飾 / マウスに近い味方へ切替)  R = R1 (修飾 / 2 人目のプレス)  F = L2 (マッチアップ)
-	  矢印 = 右スティック (フェイント / カーブ)  Z・C = 攻守レベル  P = 一時停止  H = 操作表示
+	  WASD を 2 回押し = 右スティック (フェイント)。FK・CK は溜め中に A / D でカーブ
+	  Z・C = 攻守レベル  P = 一時停止  H = 操作表示
 	  キーボードだけでも遊べる: K = ×, I = △, L = ○, J = □ (狙いは WASD)
 	マウスで指した所が狙い (指した味方へパス、スペースならそこへ)。
 ]]
@@ -35,6 +36,8 @@ local FLICKS = {
 	flickLeft = { -1, 0 },
 	flickRight = { 1, 0 },
 }
+local DOUBLE_TAP = 0.28 -- この秒数以内に同じ方向を 2 回押すとフェイント
+
 local MOVES = {
 	moveUp = { 0, -1 },
 	moveDown = { 0, 1 },
@@ -170,6 +173,7 @@ function Input.new(opts)
 	self.conns = {}
 	self.actionDown = {} -- 移動の操作 -> 押しているか
 	self.used = {} -- 一度でも押した論理ボタン
+	self.lastTap = {} -- 移動キーを最後に押した時刻 (2 回押しの判定)
 	self.lookup = Bindings.lookup(opts.bindings or Bindings.default())
 	self.buttons = {} -- 論理ボタン -> 押しているソースの数
 	self.stick = { x = 0, y = 0 } -- ゲームパッドの左スティック
@@ -322,6 +326,17 @@ function Input:_action(action, down)
 		return
 	end
 	if MOVES[action] then
+		if down and not self.actionDown[action] then
+			-- 同じ方向を素早く 2 回押す = 右スティックを弾く (フェイント)。右手はマウスのままでよい
+			local last = self.lastTap[action]
+			if last ~= nil and self.clock - last < DOUBLE_TAP then
+				local v = MOVES[action]
+				self.sink:flick(v[1], v[2])
+				self.lastTap[action] = nil
+			else
+				self.lastTap[action] = self.clock
+			end
+		end
 		self.actionDown[action] = down or nil
 		return
 	end

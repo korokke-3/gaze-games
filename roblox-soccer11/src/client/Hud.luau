@@ -462,9 +462,9 @@ function Hud:_glyph(spec, device)
 	elseif spec == "moves" then
 		return dev == "pad" and "LS" or (first("moveUp") .. first("moveLeft") .. first("moveDown") .. first("moveRight"))
 	elseif spec == "flick" then
-		return dev == "pad" and "RS" or (first("flickLeft") .. " " .. first("flickUp") .. " " .. first("flickRight") .. " " .. first("flickDown"))
+		return dev == "pad" and "RS" or (first("moveUp") .. first("moveLeft") .. first("moveDown") .. first("moveRight") .. " ×2")
 	elseif spec == "flickLR" then
-		return dev == "pad" and "RS" or (first("flickLeft") .. " " .. first("flickRight"))
+		return dev == "pad" and "RS" or (first("moveLeft") .. " / " .. first("moveRight"))
 	elseif spec == "zoom" then
 		return dev == "pad" and "—" or "Wheel"
 	end
@@ -524,9 +524,30 @@ function Hud:_renderGuide(context, device)
 	end
 	for i, row in GUIDE[context] do
 		local glyph = self:_glyph(row[1], device)
+		local fingerCol = nil
+		if device == "keyboard" then
+			local spec = row[1]
+			local firstKey = nil
+			if spec == "aim" then
+				firstKey = self.mouseAim and "MouseButton1" or "W"
+				if self.mouseAim then
+					fingerCol = Bindings.FINGER_COLORS.rindex
+				end
+			elseif type(spec) == "table" then
+				local a = spec[1]
+				local list = self.bindings.kb[a]
+				firstKey = list and list[1]
+			elseif spec == "flick" or spec == "flickLR" or spec == "moves" then
+				firstKey = "W"
+			end
+			if fingerCol == nil and firstKey ~= nil then
+				local f = Bindings.fingerOf(firstKey)
+				fingerCol = f and Bindings.FINGER_COLORS[f] or nil
+			end
+		end
 		local r = new("Frame", { BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 20), LayoutOrder = i }, self.guide)
 		local g = new("Frame", {
-			BackgroundColor3 = Color3.fromRGB(235, 235, 235),
+			BackgroundColor3 = fingerCol and Color3.fromRGB(fingerCol[1], fingerCol[2], fingerCol[3]) or Color3.fromRGB(235, 235, 235),
 			BorderSizePixel = 0,
 			Size = UDim2.fromOffset(112, 18),
 		}, r)

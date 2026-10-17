@@ -335,6 +335,54 @@ function Bindings.lookup(bindings)
 	return { kb = kb, pad = pad }
 end
 
+-- どの指で押すか (WASD に手を置き、右手はマウス)。操作設定の図と、試合中のガイドの色分けに使う
+Bindings.FINGER = {
+	Tab = "pinky",
+	CapsLock = "pinky",
+	LeftShift = "pinky",
+	LeftControl = "pinky",
+	One = "pinky",
+	Two = "ring",
+	Q = "ring",
+	A = "ring",
+	Z = "ring",
+	Three = "middle",
+	W = "middle",
+	S = "middle",
+	X = "middle",
+	Four = "index",
+	Five = "index",
+	E = "index",
+	R = "index",
+	T = "index",
+	D = "index",
+	F = "index",
+	G = "index",
+	C = "index",
+	V = "index",
+	B = "index",
+	Space = "thumb",
+	LeftAlt = "thumb",
+	MouseButton1 = "rindex",
+	MouseButton2 = "rmiddle",
+	MouseButton3 = "rmiddle",
+}
+Bindings.FINGER_ORDER = { "pinky", "ring", "middle", "index", "thumb", "rindex", "rmiddle" }
+Bindings.FINGER_COLORS = {
+	pinky = { 186, 140, 255 },
+	ring = { 110, 170, 255 },
+	middle = { 110, 220, 150 },
+	index = { 255, 185, 90 },
+	thumb = { 255, 140, 190 },
+	rindex = { 255, 120, 100 },
+	rmiddle = { 120, 220, 230 },
+}
+
+--- そのキーを押す指 (左手のホームポジション + 右手マウスの前提。それ以外は nil)。
+function Bindings.fingerOf(key)
+	return key and Bindings.FINGER[key] or nil
+end
+
 -- 画面に出す名前
 local DISPLAY = {
 	MouseButton1 = "L-Click",

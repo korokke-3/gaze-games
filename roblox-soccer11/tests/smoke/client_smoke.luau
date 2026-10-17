@@ -76,6 +76,12 @@ local okP, errP = pcall(function()
 	Press("Space")
 	Frames(3)
 	Release("Space")
+	-- WASD の 2 回押し (フェイント)
+	Press("D")
+	Release("D")
+	Press("D")
+	Release("D")
+	Frames(8)
 	Press("E")
 	Release("E")
 	Frames(5)
@@ -124,7 +130,14 @@ Check("結果画面に「もう一度」", true)
 
 -- 操作設定: パスを G に変える
 local ctrlTab = FindButton("Controls")
-Check("操作設定のタブ", ctrlTab ~= nil and pcall(ctrlTab.fn))
+Check("操作設定のタブ (指の図つき)", ctrlTab ~= nil and pcall(ctrlTab.fn))
+local fingerLabel = false
+for _, d in PlayerGui:GetDescendants() do
+	if d._p.ClassName == "TextLabel" and d._p.Text == "L pinky" then
+		fingerLabel = true
+	end
+end
+Check("指の凡例が出る", fingerLabel)
 local slot = FindButton("L-Click")
 Check("パスの枠 (L-Click) がある", slot ~= nil)
 slot.fn()

@@ -11,6 +11,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared:WaitForChild("Config"))
 local Locale = require(Shared:WaitForChild("Locale"))
+local Rig = require(script.Parent:WaitForChild("Rig"))
 
 local S = Config.View.Studs
 local PL, PW = Config.Pitch.Length, Config.Pitch.Width
@@ -170,49 +171,60 @@ function World.new(match, lang, style)
 	self.folder.Parent = Workspace
 	buildPitch(self.folder)
 
-	self.actors = {} -- player -> { body, nose, shadow, cursor, nextMark, skill, skillUntil }
+	self.actors = {} -- player -> { rig, anchor, shadow, ring, cursor, nextMark, skill, kickT }
+	self.clock = 0
 	for _, pl in match.pl do
-		local col = self:colorFor(pl)
-		local body = newPart({
-			Name = "Player",
-			Shape = Enum.PartType.Ball,
-			Size = Vector3.new(2.8, 2.8, 2.8),
-			Color = rgb(col),
-		}, self.folder)
-		local nose = newPart({ Name = "Face", Size = Vector3.new(0.9, 0.9, 1.4), Color = Color3.new(1, 1, 1) }, self.folder)
+		local col = rgb(self:colorFor(pl))
+		local rig = Rig.new(self.folder, {
+			shirt = col,
+			shorts = col:Lerp(Color3.new(0, 0, 0), 0.5),
+			skin = (pl.team * 11 + pl.i) % Rig.SKINS + 1,
+		})
+		-- 頭上の表示 (背番号・カーソル・技名) を付ける、見えない目印
+		local anchor = newPart({ Name = "Anchor", Size = Vector3.new(0.2, 0.2, 0.2), Transparency = 1 }, self.folder)
 		local shadow = newPart({
 			Name = "Shadow",
 			Shape = Enum.PartType.Cylinder,
-			Size = Vector3.new(0.05, 3.2, 3.2),
+			Size = Vector3.new(0.05, 2.6, 2.6),
 			Color = Color3.fromRGB(25, 65, 25),
+			Transparency = 0.3,
 		}, self.folder)
+		-- 操作中の選手の足元の輪 (自分 = 黄 / 味方の操作者 = 水色 / 相手の操作者 = 赤)
+		local ring = newPart({
+			Name = "CursorRing",
+			Shape = Enum.PartType.Cylinder,
+			Size = Vector3.new(0.06, 4.2, 4.2),
+			Material = Enum.Material.Neon,
+			Transparency = 0.35,
+		}, self.folder)
+		ring.Position = Vector3.new(0, -500, 0)
 
-		local num = billboard(body, UDim2.fromOffset(44, 22), Vector3.new(0, 2.6, 0))
+		local num = billboard(anchor, UDim2.fromOffset(44, 22), Vector3.new(0, 2.1, 0))
 		newLabel(num, { Text = tostring(pl.num), TextColor3 = Color3.new(1, 1, 1) })
 
-		-- 操作カーソル (自分 = 黄 / 味方の操作者 = 水色 / 相手の操作者 = 赤。名前つき)
-		local cursor = billboard(body, UDim2.fromOffset(160, 30), Vector3.new(0, 5.2, 0))
+		local cursor = billboard(anchor, UDim2.fromOffset(160, 30), Vector3.new(0, 4.1, 0))
 		local cursorLabel = newLabel(cursor, { Text = "▼", TextColor3 = Color3.fromRGB(255, 255, 120) })
 		cursor.Enabled = false
 
-		local nextMark = billboard(body, UDim2.fromOffset(40, 22), Vector3.new(0, 5.0, 0))
+		local nextMark = billboard(anchor, UDim2.fromOffset(40, 22), Vector3.new(0, 3.9, 0))
 		newLabel(nextMark, { Text = "▽", TextColor3 = Color3.fromRGB(120, 230, 255) })
 		nextMark.Enabled = false
 
-		local skill = billboard(body, UDim2.fromOffset(180, 30), Vector3.new(0, 7.5, 0))
+		local skill = billboard(anchor, UDim2.fromOffset(180, 30), Vector3.new(0, 6.4, 0))
 		local skillLabel = newLabel(skill, { Text = "", TextColor3 = Color3.fromRGB(0, 230, 255) })
 		skill.Enabled = false
 
 		self.actors[pl] = {
-			body = body,
-			nose = nose,
+			rig = rig,
+			anchor = anchor,
 			shadow = shadow,
+			ring = ring,
 			cursor = cursor,
 			cursorLabel = cursorLabel,
 			nextMark = nextMark,
 			skill = skill,
 			skillLabel = skillLabel,
-			baseColor = rgb(col),
+			kickT = -99,
 		}
 	end
 
@@ -333,42 +345,67 @@ function World:step(dt, view)
 		labelFor[lb.player] = lb
 	end
 
+	-- 蹴った選手 (キックの動き)
+	self.clock += dt
+	for _, e in match.events do
+		if e.kind == "kick" and e.player ~= nil and self.actors[e.player] ~= nil then
+			self.actors[e.player].kickT = self.clock
+		end
+	end
+
+	local parts, cframes = {}, {}
 	for pl, a in self.actors do
 		if pl.out then
-			a.body.Position = self.hidden
-			a.nose.Position = self.hidden
+			Rig.pose(a.rig, { hidden = true }, dt, parts, cframes)
+			a.anchor.Position = self.hidden
 			a.shadow.Position = self.hidden
+			a.ring.Position = self.hidden
 			a.cursor.Enabled, a.nextMark.Enabled, a.skill.Enabled = false, false, false
 			continue
 		end
-		a.baseColor = rgb(self:colorFor(pl))
-		local pos = toWorld(pl.p.x, pl.p.y, 1.4)
-		a.body.Position = pos
-		local fwd = Vector3.new(pl.face.x, 0, pl.face.y)
-		local nosePos = pos + fwd * 1.7 + Vector3.new(0, 0.3, 0)
-		a.nose.CFrame = CFrame.lookAt(nosePos, nosePos + fwd)
-		a.shadow.CFrame = CFrame.new(toWorld(pl.p.x, pl.p.y, 0.08)) * CFrame.Angles(0, 0, math.rad(90))
-		if (pl.slide or 0) > 0 then
-			a.body.Color = Color3.new(1, 1, 1)
-		elseif (pl.stun or 0) > 0 then
-			a.body.Color = a.baseColor:Lerp(Color3.new(1, 1, 1), 0.5)
-		else
-			a.body.Color = a.baseColor
+		local shirt = rgb(self:colorFor(pl))
+		Rig.setColors(a.rig, shirt, shirt:Lerp(Color3.new(0, 0, 0), 0.5))
+		local ground = toWorld(pl.p.x, pl.p.y, 0)
+		local face = Vector3.new(pl.face.x, 0, pl.face.y)
+		local vel = Vector3.new(pl.v.x, 0, pl.v.y) * S
+		local dive = 0
+		if pl.dive then
+			local right = Vector3.new(-face.Z, 0, face.X)
+			local side = vel:Dot(right)
+			dive = side > 0.5 and 1 or (side < -0.5 and -1 or 0)
+			if dive == 0 then
+				dive = 1
+			end
 		end
+		Rig.pose(a.rig, {
+			pos = ground,
+			face = face,
+			speed = vel.Magnitude,
+			kickAge = self.clock - a.kickT,
+			slide = (pl.slide or 0) > 0,
+			stun = (pl.stun or 0) > 0,
+			dive = dive,
+		}, dt, parts, cframes)
+		a.anchor.Position = toWorld(pl.p.x, pl.p.y, 2.5)
+		a.shadow.CFrame = CFrame.new(toWorld(pl.p.x, pl.p.y, 0.08)) * CFrame.Angles(0, 0, math.rad(90))
 		local owner = owners[pl]
 		if owner ~= nil then
 			a.cursor.Enabled = true
 			local isMe = owner.id == view.seatId
-			local name = owner.name
+			local color
 			if isMe then
 				a.cursorLabel.Text = "▼"
-				a.cursorLabel.TextColor3 = Color3.fromRGB(255, 255, 120)
+				color = Color3.fromRGB(255, 255, 120)
 			else
-				a.cursorLabel.Text = "▼ " .. (name or "")
-				a.cursorLabel.TextColor3 = owner.team == myTeam and Color3.fromRGB(120, 230, 255) or Color3.fromRGB(255, 110, 110)
+				a.cursorLabel.Text = "▼ " .. (owner.name or "")
+				color = owner.team == myTeam and Color3.fromRGB(120, 230, 255) or Color3.fromRGB(255, 110, 110)
 			end
+			a.cursorLabel.TextColor3 = color
+			a.ring.Color = color
+			a.ring.CFrame = CFrame.new(toWorld(pl.p.x, pl.p.y, 0.11)) * CFrame.Angles(0, 0, math.rad(90))
 		else
 			a.cursor.Enabled = false
+			a.ring.Position = self.hidden
 		end
 		a.nextMark.Enabled = pl == nxt and pl ~= myCtrl
 		local lb = labelFor[pl]
@@ -377,6 +414,15 @@ function World:step(dt, view)
 			a.skill.Enabled = true
 		else
 			a.skill.Enabled = false
+		end
+	end
+	-- 22 人分の部品をまとめて動かす
+	local ok = pcall(function()
+		Workspace:BulkMoveTo(parts, cframes, Enum.BulkMoveMode.FireCFrameChanged)
+	end)
+	if not ok then
+		for i, p in parts do
+			p.CFrame = cframes[i]
 		end
 	end
 

@@ -703,6 +703,7 @@ do
 	local m = Match.new({ random = lcg(61) })
 	step(m, 150)
 	check("リプレイ用の記録がたまる", #m.rec >= 10)
+	m.setp = nil -- 途中でセットプレーになっていても、ゴールの判定を試せるように
 	m.ball.owner, m.ball.last = nil, m.teams[0][10]
 	m.ball.p = { x = 52.4, y = 0 }
 	m.ball.v = { x = 8, y = 0 }
@@ -967,6 +968,127 @@ do
 		end
 	end
 	check("全ての操作に日英の名前", labels == #Bindings.ACTIONS, labels)
+end
+
+print("== 守備のプレス (CPU) ==")
+do
+	-- AWAY の人間がボールを持って止まっている。HOME の CPU が寄せる
+	local m = Match.new({ random = lcg(401), seats = { { id = 2, team = 1 } } })
+	local s = m:seat(2)
+	local carrier = s.ctrl
+	m:gainBall(carrier)
+	carrier.p = { x = 10, y = 0 }
+	carrier.cd = 0
+	for _, q in m.teams[0] do
+		q.cd = 0
+	end
+	m:setMove(2, 0, 0)
+	m.lastInputT = nil
+	s.lastInputT = m.elapsed -- 人間が持っている (AI に任せない)
+	local goalSide, close, overlap, frames = 0, 0, 0, 0
+	local stolen = false
+	for i = 1, 30 * 12 do
+		s.lastInputT = m.elapsed
+		m:update(1 / 30)
+		if m.ball.owner ~= carrier then
+			stolen = true
+			break
+		end
+		carrier.p = { x = 10, y = 0 }
+		carrier.v = { x = 0, y = 0 }
+		local pr = m.presser[0]
+		if i > 45 and pr ~= nil then
+			frames += 1
+			-- HOME は -x のゴールを守る: 寄せ役が保持者よりゴール側 (x が小さい) にいるか
+			if pr.p.x < carrier.p.x + 0.3 then
+				goalSide += 1
+			end
+			local d = math.sqrt((pr.p.x - carrier.p.x) ^ 2 + (pr.p.y - carrier.p.y) ^ 2)
+			if d < 5 then
+				close += 1
+			end
+			if d < 0.5 then
+				overlap += 1
+			end
+		end
+	end
+	check("寄せ役はゴール側から構える", frames == 0 or goalSide / frames > 0.8, goalSide .. "/" .. frames)
+	check("間合いを保って近くにいる", frames == 0 or close / frames > 0.7, close .. "/" .. frames)
+	check("相手の上に重ならない", overlap <= frames * 0.1, overlap .. "/" .. frames)
+	check("止まって持っていると、そのうち踏み込んで奪う (12 秒)", stolen)
+	local pr = m.presser[0]
+	check("寄せ役は保持者の方を向く", stolen or (pr ~= nil and (carrier.p.x - pr.p.x) * pr.face.x + (carrier.p.y - pr.p.y) * pr.face.y > 0))
+
+	-- 背後から追わない: 保持者より前 (相手ゴール側) にいる選手は寄せ役にしない
+	local m2 = Match.new({ random = lcg(402), ctrlKind = { [0] = "cpu", [1] = "cpu" } })
+	local c2 = m2.teams[1][10]
+	m2:gainBall(c2)
+	c2.p = { x = 0, y = 0 }
+	local behind = m2.teams[0][10] -- HOME の ST を保持者のすぐ背後 (+x 側) に
+	behind.p = { x = 1.5, y = 0 }
+	local front = m2.teams[0][6] -- HOME の DM を保持者のゴール側 4m に
+	front.p = { x = -4, y = 0 }
+	m2:update(1 / 30)
+	check("背後の選手より、ゴール側の選手が寄せる", m2.presser[0] == front, m2.presser[0] and m2.presser[0].role)
+end
+
+print("== 指の割り当て (マウス中心の配置) ==")
+do
+	local b = Bindings.fromPreset("mouse")
+	-- 試合中に使う操作は、全部「左手 (WASD に置いたまま届くキー)」か「マウス」で押せる
+	local inPlay = { "moveUp", "moveDown", "moveLeft", "moveRight", "dash", "pass", "shoot", "through", "lofted", "l1", "r1", "l2", "levelUp", "levelDown" }
+	local bad = {}
+	for _, a in inPlay do
+		local k = b.kb[a][1]
+		if Bindings.fingerOf(k) == nil then
+			table.insert(bad, a .. "=" .. tostring(k))
+		end
+	end
+	check("試合中の操作は全部、左手かマウスで押せる (右手をマウスから離さない)", #bad == 0, table.concat(bad, ","))
+	check("パス = 右人差し指 / シュート = 右中指", Bindings.fingerOf(b.kb.pass[1]) == "rindex" and Bindings.fingerOf(b.kb.shoot[1]) == "rmiddle")
+	check("ダッシュ = 左小指 / スルー = 左親指", Bindings.fingerOf(b.kb.dash[1]) == "pinky" and Bindings.fingerOf(b.kb.through[1]) == "thumb")
+	-- 移動しながら押すので、移動キー (WASD) と同じ指に、よく使う操作を重ねない
+	local moveFingers = {}
+	for _, a in { "moveUp", "moveDown", "moveLeft" } do
+		moveFingers[Bindings.fingerOf(b.kb[a][1])] = true
+	end
+	local clash = {}
+	for _, a in { "dash", "pass", "shoot", "through" } do
+		if moveFingers[Bindings.fingerOf(b.kb[a][1])] then
+			table.insert(clash, a)
+		end
+	end
+	check("よく使う操作は移動の指 (薬指・中指) と重ならない", #clash == 0, table.concat(clash, ","))
+	for _, f in Bindings.FINGER_ORDER do
+		check("指の名前 (日英): " .. f, Locale.Tables.ja["finger." .. f] ~= nil and Locale.Tables.en["finger." .. f] ~= nil)
+	end
+end
+
+print("== 効果音イベントに蹴った選手 ==")
+do
+	local m = Match.new({ random = lcg(501) })
+	local s = m:seat(1)
+	clearOpponents(m)
+	local p = giveBall(m, s, { x = 0, y = 0 })
+	m.events = {}
+	m:setAim(1, 1, 0)
+	hold(m, 1, "pass", 0.3)
+	local found = nil
+	for _, e in m.events do
+		if e.kind == "kick" then
+			found = e.player
+		end
+	end
+	check("kick イベントに蹴った選手が入る", found == p)
+	local str = Snapshot.encode(m, 0)
+	local d = Snapshot.decode(str)
+	local idx = nil
+	for _, e in d.events do
+		if e.kind == "kick" then
+			idx = e.index
+		end
+	end
+	check("オンラインでも蹴った選手が分かる", idx ~= nil and m.pl[idx] == p, idx)
 end
 
 print(("%d checks, %d failures"):format(checks, failures))

@@ -168,7 +168,7 @@ for _, nme in { "Config", "Locale", "Rewards", "Match", "Net", "Snapshot", "Bind
 	node(Shared, nme, "shared/" .. nme)
 end
 ClientRoot = node(nil, "Client", "client/init")
-for _, nme in { "World", "Hud", "Input", "Menu", "Sfx", "RemoteMatch" } do
+for _, nme in { "World", "Hud", "Input", "Menu", "Sfx", "RemoteMatch", "Rig" } do
 	node(ClientRoot, nme, "client/" .. nme)
 end
 ServerRoot = node(nil, "Server", "server/init")

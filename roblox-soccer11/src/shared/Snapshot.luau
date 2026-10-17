@@ -134,7 +134,9 @@ function Snapshot.encode(match, since)
 	local evs = match.events or {}
 	table.insert(parts, string.pack("<B", math.min(#evs, 8)))
 	for i = 1, math.min(#evs, 8) do
-		table.insert(parts, string.pack("<s1", evs[i].kind))
+		local e = evs[i]
+		local idx = e.player and indexOf(match, e.player) or 0
+		table.insert(parts, string.pack("<s1", idx > 0 and (e.kind .. ":" .. idx) or e.kind))
 	end
 	return table.concat(parts), match.seq or 0
 end
@@ -201,7 +203,13 @@ function Snapshot.decode(str)
 	end
 	s.events = {}
 	for _ = 1, read("<B") do
-		table.insert(s.events, { kind = read("<s1") })
+		local raw = read("<s1")
+		local kind, idx = string.match(raw, "^(%a+):(%d+)$")
+		if kind then
+			table.insert(s.events, { kind = kind, index = tonumber(idx) })
+		else
+			table.insert(s.events, { kind = raw })
+		end
 	end
 	return s
 end

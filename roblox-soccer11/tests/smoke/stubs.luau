@@ -44,6 +44,10 @@ V3.__index = function(t, k)
 		return function(a, b, f)
 			return setmetatable({ X = a.X + (b.X - a.X) * f, Y = a.Y + (b.Y - a.Y) * f, Z = a.Z + (b.Z - a.Z) * f }, V3)
 		end
+	elseif k == "Dot" then
+		return function(a, b)
+			return a.X * b.X + a.Y * b.Y + a.Z * b.Z
+		end
 	end
 	return nil
 end

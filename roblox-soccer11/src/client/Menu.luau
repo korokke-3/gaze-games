@@ -609,6 +609,9 @@ function Menu:_renderControls()
 		self.capture = nil
 		self.cb.onPreset("mouse")
 	end)
+	if self.ctrlDevice == "kb" then
+		self:_fingerMap(b)
+	end
 	if self.ctrlDevice == "pad" then
 		label(self.scroll, t("controls.padonly"), {
 			Size = UDim2.new(1, 0, 0, 22),
@@ -662,6 +665,143 @@ function Menu:_renderControls()
 				end)
 			end
 		end
+	end
+end
+
+--- 指の図: 左手のキーボード (WASD がホーム) と右手のマウス。キーを指の色で塗り、割り当てた操作を書く。
+function Menu:_fingerMap(b)
+	local t = function(k, ...)
+		return Locale.t(self.lang, k, ...)
+	end
+	local look = Bindings.lookup(b).kb
+	local box = new("Frame", {
+		BackgroundColor3 = Color3.fromRGB(18, 24, 22),
+		BorderSizePixel = 0,
+		Size = UDim2.new(1, 0, 0, 268),
+		LayoutOrder = nextOrder(),
+		ZIndex = 32,
+	}, self.scroll)
+	corner(box, 10)
+	label(box, t("controls.fingers"), {
+		Position = UDim2.fromOffset(12, 6),
+		Size = UDim2.new(1, -24, 0, 22),
+		TextSize = 16,
+		TextColor3 = Color3.fromRGB(255, 230, 150),
+		ZIndex = 33,
+	})
+	local KEY = 46 -- キー 1 つの大きさ [px]
+	local function key(name, x, y, w)
+		local finger = Bindings.fingerOf(name)
+		local action = look[name]
+		local col = finger and Bindings.FINGER_COLORS[finger] or { 120, 120, 120 }
+		local f = new("Frame", {
+			Position = UDim2.fromOffset(x, y),
+			Size = UDim2.fromOffset(w or KEY, KEY),
+			BackgroundColor3 = Color3.fromRGB(col[1], col[2], col[3]),
+			BackgroundTransparency = action and 0 or 0.7,
+			BorderSizePixel = 0,
+			ZIndex = 33,
+		}, box)
+		corner(f, 6)
+		label(f, Bindings.display(name), {
+			Position = UDim2.fromOffset(4, 2),
+			Size = UDim2.new(1, -8, 0, 16),
+			TextSize = 13,
+			TextColor3 = Color3.fromRGB(20, 20, 20),
+			ZIndex = 34,
+		})
+		if action then
+			label(f, t("short." .. action), {
+				Position = UDim2.fromOffset(2, 18),
+				Size = UDim2.new(1, -4, 1, -20),
+				TextSize = 10,
+				TextWrapped = true,
+				TextXAlignment = Enum.TextXAlignment.Center,
+				TextYAlignment = Enum.TextYAlignment.Top,
+				TextColor3 = Color3.fromRGB(20, 20, 20),
+				Font = Enum.Font.Gotham,
+				ZIndex = 34,
+			})
+		end
+	end
+	-- 左手 (キーボードの左側)
+	local x0, y0, g = 12, 34, KEY + 4
+	local rows = {
+		{ { "Tab", 1.3 }, { "Q" }, { "W" }, { "E" }, { "R" }, { "T" } },
+		{ { "CapsLock", 1.6 }, { "A" }, { "S" }, { "D" }, { "F" }, { "G" } },
+		{ { "LeftShift", 2.0 }, { "Z" }, { "X" }, { "C" }, { "V" }, { "B" } },
+		{ { "LeftControl", 1.3 }, { "LeftAlt", 1.3 }, { "Space", 4.4 } },
+	}
+	for r, row in rows do
+		local x = x0
+		for _, k in row do
+			local w = (k[2] or 1) * KEY + ((k[2] or 1) - 1) * 4
+			key(k[1], x, y0 + (r - 1) * g, w)
+			x += w + 4
+		end
+	end
+	-- 右手 (マウス)
+	local mx = x0 + 7.6 * g + 24
+	local mouse = new("Frame", {
+		Position = UDim2.fromOffset(mx, y0),
+		Size = UDim2.fromOffset(120, 196),
+		BackgroundColor3 = Color3.fromRGB(60, 66, 64),
+		BorderSizePixel = 0,
+		ZIndex = 33,
+	}, box)
+	corner(mouse, 40)
+	local function mbtn(name, x, y, w, h)
+		local finger = Bindings.fingerOf(name)
+		local col = Bindings.FINGER_COLORS[finger]
+		local action = look[name]
+		local f = new("Frame", {
+			Position = UDim2.fromOffset(mx + x, y0 + y),
+			Size = UDim2.fromOffset(w, h),
+			BackgroundColor3 = Color3.fromRGB(col[1], col[2], col[3]),
+			BackgroundTransparency = action and 0 or 0.7,
+			BorderSizePixel = 0,
+			ZIndex = 34,
+		}, box)
+		corner(f, 8)
+		label(f, Bindings.display(name) .. (action and ("\n" .. t("short." .. action)) or ""), {
+			Size = UDim2.fromScale(1, 1),
+			TextSize = 11,
+			TextWrapped = true,
+			TextXAlignment = Enum.TextXAlignment.Center,
+			TextColor3 = Color3.fromRGB(20, 20, 20),
+			ZIndex = 35,
+		})
+	end
+	mbtn("MouseButton1", 4, 4, 52, 84)
+	mbtn("MouseButton2", 64, 4, 52, 84)
+	mbtn("MouseButton3", 44, 92, 32, 40)
+	label(box, t("controls.mouse"), {
+		Position = UDim2.fromOffset(mx, y0 + 200),
+		Size = UDim2.fromOffset(120, 18),
+		TextSize = 12,
+		TextXAlignment = Enum.TextXAlignment.Center,
+		TextColor3 = Color3.fromRGB(200, 210, 205),
+		ZIndex = 33,
+	})
+	-- 凡例
+	local lx = x0
+	for _, finger in Bindings.FINGER_ORDER do
+		local col = Bindings.FINGER_COLORS[finger]
+		local chip = new("Frame", {
+			Position = UDim2.fromOffset(lx, y0 + 4 * g + 6),
+			Size = UDim2.fromOffset(12, 12),
+			BackgroundColor3 = Color3.fromRGB(col[1], col[2], col[3]),
+			BorderSizePixel = 0,
+			ZIndex = 33,
+		}, box)
+		corner(chip, 6)
+		label(box, t("finger." .. finger), {
+			Position = UDim2.fromOffset(lx + 16, y0 + 4 * g + 2),
+			Size = UDim2.fromOffset(74, 20),
+			TextSize = 12,
+			ZIndex = 33,
+		})
+		lx += 92
 	end
 end
 
