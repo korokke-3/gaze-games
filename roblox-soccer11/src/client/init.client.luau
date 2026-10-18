@@ -17,6 +17,7 @@ local Locale = require(Shared:WaitForChild("Locale"))
 local Match = require(Shared:WaitForChild("Match"))
 local Net = require(Shared:WaitForChild("Net"))
 local Bindings = require(Shared:WaitForChild("Bindings"))
+local Practice = require(Shared:WaitForChild("Practice"))
 
 local World = require(script:WaitForChild("World"))
 local Hud = require(script:WaitForChild("Hud"))
@@ -277,6 +278,76 @@ startSolo = function(opts)
 	})
 end
 
+-- ================================================================ 練習 (コインは出ない。サーバーへは自己ベストだけ保存)
+local startPractice
+
+local function practiceKey(kind)
+	for _, d in Menu.PRACTICE do
+		if d.kind == kind then
+			return d.pb
+		end
+	end
+	return nil
+end
+
+local function practiceFinished(kind, pr, popts)
+	hud.gui.Enabled = false
+	local key = practiceKey(kind)
+	local best = key and menu.opts[key] or 0
+	local value = pr.result
+	local isNew = Practice.better(kind, value, best > 0 and best or nil) and (value or 0) > 0
+	if isNew and key then
+		menu.opts[key] = value
+		Net.event("SaveSettings"):FireServer(menu.opts)
+	end
+	stopMatch()
+	menu:showPracticeResult(kind, value, best, isNew, function()
+		startPractice(kind, popts)
+	end, function()
+		backToMenu("practice")
+	end)
+end
+
+startPractice = function(kind, popts)
+	popts = popts or {}
+	local opts = menu.opts
+	local pr = Practice.new(kind, {
+		random = randomFn,
+		assist = opts.assist,
+		difficulty = opts.difficulty,
+		defenders = popts.defenders,
+	})
+	local match = pr.match
+	local view = { seatId = SOLO_SEAT, myTeam = 0, online = false }
+	runMatch(match, view, Input.localSink(match, SOLO_SEAT), opts, function(dt)
+		pr:update(dt)
+		if pr.done then
+			match.ended = true -- 結果画面へ (runMatch の onEnd)
+		end
+	end, function()
+		practiceFinished(kind, pr, popts)
+	end)
+	hud:setPauseHandlers({
+		online = false,
+		onOpen = function()
+			if not match.paused then
+				match:command(SOLO_SEAT, "pause")
+			end
+		end,
+		onResume = function()
+			if match.paused then
+				match:command(SOLO_SEAT, "pause")
+			end
+		end,
+		onRestart = function()
+			pr:restart()
+		end,
+		onQuit = function()
+			backToMenu("practice")
+		end,
+	})
+end
+
 -- ================================================================ オンライン
 local online = nil -- { remote }
 
@@ -384,6 +455,10 @@ menu = Menu.new(menuGui, lang, {
 	end,
 	onStart = function(opts)
 		startSolo(opts)
+	end,
+	onPractice = function(kind, popts)
+		menu.opts.practiceDefenders = popts.defenders
+		startPractice(kind, popts)
 	end,
 	onBuy = function(kind, id)
 		Net.event("BuyItem"):FireServer(kind, id)

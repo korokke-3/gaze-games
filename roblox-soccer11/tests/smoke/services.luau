@@ -164,7 +164,7 @@ local function node(parent, name, modulePath)
 	return n
 end
 Shared = node(rs, "Shared")
-for _, nme in { "Config", "Locale", "Rewards", "Match", "Net", "Snapshot", "Bindings" } do
+for _, nme in { "Config", "Locale", "Rewards", "Match", "Net", "Snapshot", "Bindings", "Practice" } do
 	node(Shared, nme, "shared/" .. nme)
 end
 ClientRoot = node(nil, "Client", "client/init")

@@ -321,6 +321,20 @@ function World.new(match, lang, style)
 		Material = Enum.Material.Neon,
 		Transparency = 0.45,
 	}, self.folder)
+	-- 練習: パスを出す相手 (★ と緑の輪)
+	self.starRing = newPart({
+		Name = "PracticeRing",
+		Shape = Enum.PartType.Cylinder,
+		Size = Vector3.new(0.08, 5.0, 5.0),
+		Color = Color3.fromRGB(80, 255, 140),
+		Material = Enum.Material.Neon,
+		Transparency = 0.2,
+	}, self.folder)
+	self.starRing.Position = Vector3.new(0, -500, 0)
+	self.starAnchor = newPart({ Name = "PracticeStar", Size = Vector3.new(0.2, 0.2, 0.2), Transparency = 1 }, self.folder)
+	self.starAnchor.Position = Vector3.new(0, -500, 0)
+	local star = billboard(self.starAnchor, UDim2.fromOffset(60, 40), Vector3.new(0, 0, 0))
+	newLabel(star, { Text = "★", TextColor3 = Color3.fromRGB(80, 255, 140) })
 	-- マウスの照準 (指している地点)
 	self.reticle = newPart({
 		Name = "Reticle",
@@ -527,6 +541,16 @@ function World:step(dt, view)
 		self.targetRing.CFrame = CFrame.new(toWorld(recv.p.x, recv.p.y, 0.1)) * CFrame.Angles(0, 0, math.rad(90))
 	else
 		self.targetRing.Position = self.hidden
+	end
+	local hl = match.practice and match.practice.highlight
+	if hl ~= nil and not hl.out then
+		local pulse = 1 + 0.12 * math.sin(self.clock * 8)
+		self.starRing.Size = Vector3.new(0.08, 5.0 * pulse, 5.0 * pulse)
+		self.starRing.CFrame = CFrame.new(toWorld(hl.p.x, hl.p.y, 0.12)) * CFrame.Angles(0, 0, math.rad(90))
+		self.starAnchor.Position = toWorld(hl.p.x, hl.p.y, 6.2)
+	else
+		self.starRing.Position = Vector3.new(0, -500, 0)
+		self.starAnchor.Position = Vector3.new(0, -500, 0)
 	end
 end
 

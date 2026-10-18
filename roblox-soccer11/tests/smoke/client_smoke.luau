@@ -128,6 +128,53 @@ FindButton("II").fn()
 FindButton("Quit match (no reward)").fn()
 Check("結果画面に「もう一度」", true)
 
+-- 練習モード
+local practiceTab = FindButton("Practice")
+Check("練習のタブ", practiceTab ~= nil and pcall(practiceTab.fn))
+local defBtn = FindButton("Opponents: 0")
+Check("フリー練習の相手の人数を選べる", defBtn ~= nil and pcall(defBtn.fn) and FindButton("Opponents: 3") ~= nil)
+local startsBefore = #CallsOf("MatchStarted")
+local okF, errF = pcall(function()
+	-- 一番上の「Start」= フリー練習 (FindButton は最後に作ったものを返すので、全部の中から探す)
+	local first = nil
+	for _, h in Handlers do
+		if h.sig == "Activated" and not h.dead and h.owner and not h.owner._destroyed and h.owner._p.Text == "Start" then
+			first = first or h
+		end
+	end
+	first.fn()
+	Frames(60)
+	Press("J")
+	Frames(10)
+	Release("J")
+	Frames(30)
+end)
+Check("フリー練習を始めて動かせる", okF, errF)
+Check("練習はサーバーに試合開始を送らない (報酬なし)", #CallsOf("MatchStarted") == startsBefore)
+FindButton("II").fn()
+local restart = FindButton("Restart drill")
+Check("一時停止メニューに「やり直す」", restart ~= nil and pcall(restart.fn))
+Frames(10)
+FindButton("II").fn()
+local endBtn = FindButton("End practice")
+Check("練習をやめて練習タブへ戻る", endBtn ~= nil and pcall(endBtn.fn) and FindButton("Opponents: 3") ~= nil)
+-- 守備練習 (最後の「Start」) を最後まで: 放置しても 1 本 15 秒で失敗扱いになり、5 本で終わる
+local okD, errD = pcall(function()
+	FindButton("Start").fn()
+	local n = 0
+	while FindButton("Try again") == nil and n < 6000 do
+		Frames(1)
+		n += 1
+	end
+end)
+Check("守備練習が最後まで進み、結果画面が出る", okD and FindButton("Try again") ~= nil, errD)
+local again = FindButton("Try again")
+Check("結果画面から「もう一度」", again ~= nil and pcall(again.fn))
+Frames(10)
+FindButton("II").fn()
+FindButton("End practice").fn()
+FindButton("Play").fn()
+
 -- 操作設定: パスを G に変える
 local ctrlTab = FindButton("Controls")
 Check("操作設定のタブ (指の図つき)", ctrlTab ~= nil and pcall(ctrlTab.fn))

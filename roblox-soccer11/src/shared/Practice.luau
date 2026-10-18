@@ -317,6 +317,12 @@ function Practice:pickTarget()
 	self.highlight = cands[math.floor(self.random() * #cands) + 1]
 end
 
+--- 1 本ごとの結果 (HUD に「ナイス!」「失敗」を出す)。
+function Practice:mark(r)
+	self.lastResult = r
+	self.match:popup(r == "good" and "practice.good" or "practice.bad", r == "good" and 0 or 1)
+end
+
 function Practice:finish()
 	self.done = true
 	self.highlight = nil
@@ -378,7 +384,7 @@ function Practice:update(dt)
 	local roundLimit = ({ shoot = 12, fk = 20, defend = 15 })[self.kind]
 	if roundLimit ~= nil and m.elapsed - (self.roundStart or 0) > roundLimit and not scored then
 		self.progress += 1
-		self.lastResult = "bad"
+		self:mark("bad")
 		self.waitT = 1.0
 		return
 	end
@@ -402,7 +408,7 @@ function Practice:update(dt)
 		end
 		if b.owner ~= nil and b.owner.team == 0 and b.owner == self.highlight then
 			self.progress += 1
-			self.lastResult = "good"
+			self:mark("good")
 			if self.progress >= self.total then
 				self:finish()
 			else
@@ -426,16 +432,16 @@ function Practice:update(dt)
 		if scored then
 			self.score += 1
 			self.progress += 1
-			self.lastResult = "good"
+			self:mark("good")
 			self.waitT = 1.2
 		elseif fail then
 			self.progress += 1
-			self.lastResult = "bad"
+			self:mark("bad")
 			self.waitT = 1.2
 		elseif kind == "fk" and self.shotT ~= nil and m.setp ~= nil then
 			-- 蹴った後にセットプレーになった (外れた) = 失敗
 			self.progress += 1
-			self.lastResult = "bad"
+			self:mark("bad")
 			self.waitT = 1.2
 		end
 	elseif kind == "skills" then
@@ -443,7 +449,7 @@ function Practice:update(dt)
 		if p ~= nil and type(p.skill) == "table" and not self.skillsDone[p.skill.name] then
 			self.skillsDone[p.skill.name] = true
 			self.progress += 1
-			self.lastResult = "good"
+			self:mark("good")
 			if self.progress >= self.total then
 				self:finish()
 			end
@@ -458,11 +464,11 @@ function Practice:update(dt)
 		if won then
 			self.score += 1
 			self.progress += 1
-			self.lastResult = "good"
+			self:mark("good")
 			self.waitT = 1.0
 		elseif lost then
 			self.progress += 1
-			self.lastResult = "bad"
+			self:mark("bad")
 			self.waitT = 1.0
 		end
 	end
@@ -479,10 +485,10 @@ function Practice:onFail()
 			back = m.teams[0][10]
 		end
 		self:giveBall(back)
-		self.lastResult = "bad"
+		self:mark("bad")
 	elseif kind == "shoot" then
 		self.progress += 1
-		self.lastResult = "bad"
+		self:mark("bad")
 		self.waitT = 1.0
 	elseif kind == "defend" then
 		-- 相手が出した = 奪ったのと同じ / 自分が出した = 失敗

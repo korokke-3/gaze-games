@@ -14,6 +14,7 @@ MODULES = {
     "shared/Match": "src/shared/Match.luau",
     "shared/Snapshot": "src/shared/Snapshot.luau",
     "shared/Bindings": "src/shared/Bindings.luau",
+    "shared/Practice": "src/shared/Practice.luau",
     "client/RemoteMatch": "src/client/RemoteMatch.luau",
     "client/Rig": "src/client/Rig.luau",
     "server/Services/Rooms": "src/server/Services/Rooms.luau",

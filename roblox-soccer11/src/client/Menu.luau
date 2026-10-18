@@ -157,7 +157,25 @@ local DEFAULTS = {
 	assist = Config.Controls.DefaultAssist,
 	mouseAim = true,
 	tipsDone = false,
+	-- 練習の自己ベスト (0 = 記録なし)
+	pbPass = 0,
+	pbShoot = 0,
+	pbSkills = 0,
+	pbFk = 0,
+	pbDefend = 0,
+	practiceDefenders = 0,
 }
+
+-- 練習の種類と、自己ベストを入れる設定のキー
+local PRACTICE = {
+	{ kind = "free" },
+	{ kind = "pass", pb = "pbPass", rec = "time" },
+	{ kind = "shoot", pb = "pbShoot", rec = "count" },
+	{ kind = "skills", pb = "pbSkills", rec = "time" },
+	{ kind = "fk", pb = "pbFk", rec = "count" },
+	{ kind = "defend", pb = "pbDefend", rec = "count" },
+}
+Menu.PRACTICE = PRACTICE
 
 --[[
 	callbacks: { onStart(opts), onBuy(kind, id), onEquip(kind, id), onPrompt(kind, key), onSettings(opts) }
@@ -207,7 +225,7 @@ function Menu.new(gui, lang, callbacks)
 		BackgroundTransparency = 1,
 		AnchorPoint = Vector2.new(0.5, 0),
 		Position = UDim2.new(0.5, 0, 0, 58),
-		Size = UDim2.fromOffset(640, 40),
+		Size = UDim2.fromOffset(760, 40),
 		ZIndex = 31,
 	}, self.root)
 	new("UIListLayout", {
@@ -215,8 +233,8 @@ function Menu.new(gui, lang, callbacks)
 		Padding = UDim.new(0, 10),
 		HorizontalAlignment = Enum.HorizontalAlignment.Center,
 	}, tabBar)
-	for _, id in { "play", "online", "controls", "shop" } do
-		local b = button(tabBar, Locale.t(lang, "menu." .. id), GREY, { Size = UDim2.fromOffset(150, 38), ZIndex = 32 })
+	for _, id in { "play", "practice", "online", "controls", "shop" } do
+		local b = button(tabBar, Locale.t(lang, "menu." .. id), GREY, { Size = UDim2.fromOffset(142, 38), ZIndex = 32 })
 		b.Activated:Connect(function()
 			self:setPage(id)
 		end)
@@ -318,6 +336,8 @@ function Menu:_render()
 	self:_clear()
 	if self.page == "play" then
 		self:_renderPlay()
+	elseif self.page == "practice" then
+		self:_renderPractice()
 	elseif self.page == "online" then
 		self:_renderOnline()
 	elseif self.page == "controls" then
@@ -364,6 +384,149 @@ function Menu:_renderPlay()
 	})
 	start.Activated:Connect(function()
 		self.cb.onStart(self.opts)
+	end)
+end
+
+-- ================================================================ 練習
+--- 記録の表示 (タイムは秒、回数は n/総数)。
+function Menu:_recordText(def, value)
+	if value == nil or value <= 0 then
+		return Locale.t(self.lang, "practice.nobest")
+	end
+	if def.rec == "time" then
+		return Locale.t(self.lang, "practice.rec.time", value)
+	end
+	return Locale.t(self.lang, "practice.rec.count", value, ({ shoot = 10, fk = 5, defend = 5 })[def.kind] or 0)
+end
+
+function Menu:_renderPractice()
+	local t = function(k, ...)
+		return Locale.t(self.lang, k, ...)
+	end
+	self:_header(t("practice.title"))
+	for _, def in PRACTICE do
+		local row = self:_row(64)
+		label(row, t("practice." .. def.kind), {
+			Position = UDim2.fromOffset(12, 4),
+			Size = UDim2.new(0.6, 0, 0, 26),
+			ZIndex = 33,
+		})
+		label(row, t("practice.desc." .. def.kind), {
+			Position = UDim2.fromOffset(12, 32),
+			Size = UDim2.new(0.62, 0, 0, 26),
+			TextSize = 13,
+			TextWrapped = true,
+			TextColor3 = Color3.fromRGB(190, 210, 200),
+			ZIndex = 33,
+		})
+		if def.pb then
+			label(row, t("practice.best") .. " " .. self:_recordText(def, self.opts[def.pb]), {
+				AnchorPoint = Vector2.new(1, 0),
+				Position = UDim2.new(1, -132, 0, 4),
+				Size = UDim2.new(0.3, 0, 0, 26),
+				TextSize = 14,
+				TextXAlignment = Enum.TextXAlignment.Right,
+				TextColor3 = GOLD,
+				ZIndex = 33,
+			})
+		else
+			-- フリー練習: 相手の人数を選ぶ
+			local choices = { 0, 3, 11 }
+			local function defText(n)
+				return t("practice.defenders", n)
+			end
+			local db = button(row, defText(self.opts.practiceDefenders or 0), GREY, {
+				AnchorPoint = Vector2.new(1, 0.5),
+				Position = UDim2.new(1, -132, 0.5, 0),
+				Size = UDim2.fromOffset(130, 34),
+				TextSize = 14,
+				ZIndex = 33,
+			})
+			db.Activated:Connect(function()
+				local cur = self.opts.practiceDefenders or 0
+				local idx = table.find(choices, cur) or 1
+				self.opts.practiceDefenders = choices[idx % #choices + 1]
+				db.Text = defText(self.opts.practiceDefenders)
+			end)
+		end
+		local go = button(row, t("practice.start"), GREEN, {
+			AnchorPoint = Vector2.new(1, 0.5),
+			Position = UDim2.new(1, -8, 0.5, 0),
+			Size = UDim2.fromOffset(116, 44),
+			TextSize = 18,
+			ZIndex = 33,
+		})
+		go.Activated:Connect(function()
+			if self.cb.onPractice then
+				self.cb.onPractice(def.kind, { defenders = self.opts.practiceDefenders or 0 })
+			end
+		end)
+	end
+end
+
+--- 練習の結果。value: 今回の記録、best: これまでの自己ベスト、isNew: 更新したか
+function Menu:showPracticeResult(kind, value, best, isNew, onAgain, onMenu)
+	self.root.Visible = true
+	for _, b in self.tabs do
+		b.Visible = false
+	end
+	order = 0
+	self:_clear()
+	local t = function(k, ...)
+		return Locale.t(self.lang, k, ...)
+	end
+	local def = PRACTICE[1]
+	for _, d in PRACTICE do
+		if d.kind == kind then
+			def = d
+		end
+	end
+	label(self.scroll, t("practice." .. kind) .. "   " .. t("practice.done"), {
+		Size = UDim2.new(1, 0, 0, 40),
+		TextSize = 26,
+		TextXAlignment = Enum.TextXAlignment.Center,
+		LayoutOrder = nextOrder(),
+		ZIndex = 32,
+	})
+	label(self.scroll, self:_recordText(def, value), {
+		Size = UDim2.new(1, 0, 0, 56),
+		TextSize = 40,
+		TextXAlignment = Enum.TextXAlignment.Center,
+		TextColor3 = isNew and GOLD or Color3.new(1, 1, 1),
+		LayoutOrder = nextOrder(),
+		ZIndex = 32,
+	})
+	label(self.scroll, isNew and t("practice.newbest") or (t("practice.best") .. " " .. self:_recordText(def, best)), {
+		Size = UDim2.new(1, 0, 0, 28),
+		TextSize = 20,
+		TextXAlignment = Enum.TextXAlignment.Center,
+		TextColor3 = isNew and GOLD or Color3.fromRGB(200, 230, 210),
+		LayoutOrder = nextOrder(),
+		ZIndex = 32,
+	})
+	local function restoreTabs()
+		for _, b in self.tabs do
+			b.Visible = true
+		end
+	end
+	local again = button(self.scroll, t("practice.again"), GREEN, {
+		Size = UDim2.new(1, 0, 0, 50),
+		TextSize = 22,
+		LayoutOrder = nextOrder(),
+		ZIndex = 32,
+	})
+	again.Activated:Connect(function()
+		restoreTabs()
+		onAgain()
+	end)
+	local back = button(self.scroll, t("menu.back"), GREY, {
+		Size = UDim2.new(1, 0, 0, 44),
+		LayoutOrder = nextOrder(),
+		ZIndex = 32,
+	})
+	back.Activated:Connect(function()
+		restoreTabs()
+		onMenu()
 	end)
 end
 

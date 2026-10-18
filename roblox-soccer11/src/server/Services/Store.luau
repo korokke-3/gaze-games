@@ -181,6 +181,13 @@ local SETTING_KEYS = {
 	assist = "number",
 	mouseAim = "boolean",
 	tipsDone = "boolean",
+	-- 練習の自己ベスト (報酬は無いので、範囲だけ確かめる)
+	pbPass = "number",
+	pbShoot = "number",
+	pbSkills = "number",
+	pbFk = "number",
+	pbDefend = "number",
+	practiceDefenders = "number",
 }
 
 function Store.saveSettings(player: Player, raw: any)
@@ -193,6 +200,11 @@ function Store.saveSettings(player: Player, raw: any)
 		if typeof(v) == t then
 			if t == "string" then
 				v = string.sub(v, 1, 12)
+			elseif t == "number" then
+				if v ~= v then
+					continue -- NaN
+				end
+				v = math.clamp(v, 0, 100000)
 			end
 			data.settings[k] = v
 		end

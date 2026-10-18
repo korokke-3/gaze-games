@@ -121,7 +121,7 @@ function Hud.new(lang)
 	self.periodText = text(self.gui, {
 		AnchorPoint = Vector2.new(0.5, 0),
 		Position = UDim2.new(0.5, 0, 0, 54),
-		Size = UDim2.fromOffset(360, 20),
+		Size = UDim2.fromOffset(720, 20),
 		TextSize = 14,
 		TextScaled = false,
 		TextColor3 = Color3.fromRGB(200, 230, 210),
@@ -269,7 +269,7 @@ function Hud.new(lang)
 	self.pausePanel = panel(self.gui, {
 		AnchorPoint = Vector2.new(0.5, 0.5),
 		Position = UDim2.fromScale(0.5, 0.5),
-		Size = UDim2.fromOffset(340, 250),
+		Size = UDim2.fromOffset(340, 310),
 		BackgroundTransparency = 0.1,
 		Visible = false,
 		ZIndex = 20,
@@ -299,10 +299,19 @@ function Hud.new(lang)
 	self.resumeButton = pbtn(2, "pause.resume", Color3.fromRGB(40, 170, 80), function()
 		self:closePause(true)
 	end)
-	pbtn(3, "pause.guide", Color3.fromRGB(90, 96, 94), function()
+	-- 練習: 最初からやり直す (練習のときだけ出す)
+	self.restartButton = pbtn(3, "pause.restart", Color3.fromRGB(40, 120, 190), function()
+		local h = self.pauseHandlers
+		self:closePause(true)
+		if h and h.onRestart then
+			h.onRestart()
+		end
+	end)
+	self.restartButton.Visible = false
+	pbtn(4, "pause.guide", Color3.fromRGB(90, 96, 94), function()
 		self:toggleHelp()
 	end)
-	self.quitButton = pbtn(4, "pause.quit", Color3.fromRGB(150, 60, 60), function()
+	self.quitButton = pbtn(5, "pause.quit", Color3.fromRGB(150, 60, 60), function()
 		local h = self.pauseHandlers
 		self:closePause(false)
 		if h and h.onQuit then
@@ -366,7 +375,8 @@ end
 function Hud:setPauseHandlers(h)
 	self.pauseHandlers = h
 	self.pauseTitle.Text = Locale.t(self.lang, h.online and "pause.title.online" or "pause.title")
-	self.quitButton.Text = Locale.t(self.lang, h.online and "pause.leave" or "pause.quit")
+	self.quitButton.Text = Locale.t(self.lang, h.online and "pause.leave" or (h.onRestart and "pause.quitPractice" or "pause.quit"))
+	self.restartButton.Visible = h.onRestart ~= nil
 	self:closePause(false)
 end
 
@@ -621,14 +631,20 @@ function Hud:step(match, view)
 	if (added or 0) > 0 then
 		clockText ..= string.format(" +%d", added)
 	end
-	self.scoreText.Text = string.format(
-		"%s  %d - %d  %s    %s",
-		self:teamName(match, 0, myTeam),
-		match.score[0],
-		match.score[1],
-		self:teamName(match, 1, myTeam),
-		clockText
-	)
+	local pr = match.practice
+	if pr ~= nil then
+		-- 練習: 時計と得点の代わりに、ドリル名と進み具合
+		self.scoreText.Text = t(self.lang, "practice." .. pr.kind) .. "   " .. t(self.lang, pr:status())
+	else
+		self.scoreText.Text = string.format(
+			"%s  %d - %d  %s    %s",
+			self:teamName(match, 0, myTeam),
+			match.score[0],
+			match.score[1],
+			self:teamName(match, 1, myTeam),
+			clockText
+		)
+	end
 
 	-- 前後半・延長・PK 戦
 	local periodKey
@@ -646,6 +662,9 @@ function Hud:step(match, view)
 	local lv = match.level and match.level[myTeam] or 0
 	if lv ~= 0 then
 		ptext ..= "   " .. t(self.lang, "hud.level", (lv > 0 and "+" or "") .. tostring(lv))
+	end
+	if pr ~= nil then
+		ptext = t(self.lang, "practice.hint." .. pr.kind)
 	end
 	self.periodText.Text = ptext
 	self.replayText.Visible = match.mode == "replay"
