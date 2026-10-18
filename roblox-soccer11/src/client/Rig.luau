@@ -18,7 +18,7 @@
 
 local Rig = {}
 
-local U = 0.8 -- 1 ブロックの大きさ [studs]。背の高さは約 5.3U = 4.2 studs (≒ 2.1m)
+local U = 0.7 -- 1 ブロックの大きさ [studs]。背の高さは約 5.2U = 3.64 studs (≒ 1.82m)
 local LEG_H, LEG_W = 2 * U, 1 * U
 local TORSO_H, TORSO_W, TORSO_D = 2 * U, 2 * U, 1 * U
 local ARM_H, ARM_W = 2 * U, 1 * U

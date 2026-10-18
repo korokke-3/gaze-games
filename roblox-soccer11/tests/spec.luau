@@ -308,12 +308,38 @@ do
 	end
 	check("狙った側にシュートが飛ぶ", shotY(3) > 0 and shotY(-3) < 0)
 
-	-- コントロールシュート (R1) はぶれにくい
+	-- コントロールシュート (R1) はぶれにくく、ファーへ巻く
+	local function awayAll(mm)
+		for _, q in mm.teams[1] do
+			q.p = { x = -45, y = 30 }
+			q.v = { x = 0, y = 0 }
+		end
+	end
+	-- ゴールラインを越えた時の y と、途中で一番外へ膨らんだ y
+	-- 返り値: ゴールライン上の y、始点と終点を結ぶ直線から一番離れた距離
+	local function flight(mm)
+		local pts = { { x = mm.ball.p.x, y = mm.ball.p.y } }
+		for _ = 1, 120 do
+			step(mm, 1)
+			table.insert(pts, { x = mm.ball.p.x, y = mm.ball.p.y })
+			if mm.ball.p.x >= 52.5 then
+				break
+			end
+		end
+		local a, b = pts[1], pts[#pts]
+		local dx, dy = b.x - a.x, b.y - a.y
+		local L = math.max(math.sqrt(dx * dx + dy * dy), 1e-6)
+		local bend = 0
+		for _, q in pts do
+			bend = math.max(bend, math.abs((q.x - a.x) * dy - (q.y - a.y) * dx) / L)
+		end
+		return b.y, bend
+	end
 	local function spread(r1)
 		local sum = 0
 		for k = 1, 30 do
 			local mm = Match.new({ random = lcg(100 + k) })
-			clearOpponents(mm)
+			awayAll(mm)
 			local ss = mm:seat(1)
 			giveBall(mm, ss, { x = 30, y = 0 })
 			mm:setAim(1, 1, 0)
@@ -321,11 +347,33 @@ do
 				mm:press(1, "r1")
 			end
 			hold(mm, 1, "shoot", 0.5)
-			sum += math.abs(mm.ball.v.y / mm.ball.v.x * 22.5)
+			sum += math.abs((flight(mm)))
 		end
 		return sum / 30
 	end
 	check("コントロールシュートはぶれが小さい", spread(true) < spread(false), spread(true) .. " / " .. spread(false))
+	do
+		-- 左寄り (y = -10) からファー (y = +2.5) を狙う: 外へ膨らんで (直線から 0.5 m 以上曲がって) 枠へ入る
+		local inGoal, bent = 0, 0
+		for k = 1, 10 do
+			local mm = Match.new({ random = lcg(300 + k) })
+			awayAll(mm)
+			local ss = mm:seat(1)
+			giveBall(mm, ss, { x = 33, y = -10 })
+			mm:setAimPoint(1, 52.5, 2.5)
+			mm:press(1, "r1")
+			hold(mm, 1, "shoot", 0.4)
+			mm:release(1, "r1")
+			local y, bend = flight(mm)
+			if math.abs(y) < 3.66 then
+				inGoal += 1
+			end
+			if bend > 0.5 then
+				bent += 1
+			end
+		end
+		check("コントロールシュートはファーへ巻いて枠に入る", inGoal >= 7 and bent >= 7, inGoal .. " in / " .. bent .. " bent")
+	end
 end
 
 print("== ダイレクト・ヘディング ==")
@@ -532,7 +580,7 @@ do
 	local m = Match.new({ random = lcg(81) })
 	local s = m:seat(1)
 	m.ball.owner, m.ball.last = nil, m.teams[1][8]
-	m.ball.p = { x = 10, y = 33.9 }
+	m.ball.p = { x = 10, y = 34.0 }
 	m.ball.v = { x = 0, y = 6 }
 	m:update(1 / 30)
 	check("タッチラインを出たらスローイン", m.setp ~= nil and m.setp.kind == "throw")
@@ -543,7 +591,7 @@ do
 
 	local m2 = Match.new({ random = lcg(82) })
 	m2.ball.owner, m2.ball.last = nil, m2.teams[1][8]
-	m2.ball.p = { x = 52.4, y = 20 }
+	m2.ball.p = { x = 52.5, y = 20 }
 	m2.ball.v = { x = 6, y = 0 }
 	m2:update(1 / 30)
 	check("相手が出したらコーナー", m2.setp ~= nil and m2.setp.kind == "corner" and m2.setp.team == 0)
@@ -579,7 +627,7 @@ print("== ゴール ==")
 do
 	local m = Match.new({ random = lcg(91) })
 	m.ball.owner, m.ball.last = nil, m.teams[0][10]
-	m.ball.p = { x = 52.4, y = 0 }
+	m.ball.p = { x = 52.5, y = 0 }
 	m.ball.v = { x = 8, y = 0 }
 	m.ball.z = 0.5
 	m:update(1 / 30)
@@ -588,7 +636,7 @@ do
 	check("GOAL の表示 (得したチームつき)", #m.popups >= 1 and m.popups[1].key == "popup.goal" and m.popups[1].team == 0)
 	local m2 = Match.new({ random = lcg(92) })
 	m2.ball.owner, m2.ball.last = nil, m2.teams[0][10]
-	m2.ball.p = { x = 52.4, y = 0 }
+	m2.ball.p = { x = 52.5, y = 0 }
 	m2.ball.v = { x = 8, y = 0 }
 	m2.ball.z = 3.5
 	m2:update(1 / 30)
@@ -616,7 +664,7 @@ do
 	local g = Match.new(cpuOpts(103, { length = 60 }))
 	g.flip = true
 	g.ball.owner, g.ball.last = nil, g.teams[0][10]
-	g.ball.p = { x = -52.4, y = 0 }
+	g.ball.p = { x = -52.5, y = 0 }
 	g.ball.v = { x = -8, y = 0 }
 	g.ball.z = 0.5
 	g:update(1 / 30)
@@ -705,7 +753,7 @@ do
 	check("リプレイ用の記録がたまる", #m.rec >= 10)
 	m.setp = nil -- 途中でセットプレーになっていても、ゴールの判定を試せるように
 	m.ball.owner, m.ball.last = nil, m.teams[0][10]
-	m.ball.p = { x = 52.4, y = 0 }
+	m.ball.p = { x = 52.5, y = 0 }
 	m.ball.v = { x = 8, y = 0 }
 	m.ball.z = 0.5
 	m:update(1 / 30)
@@ -1131,7 +1179,7 @@ do
 	-- スローイン
 	local m = Match.new({ random = lcg(602) })
 	m.ball.owner, m.ball.last = nil, m.teams[1][8]
-	m.ball.p = { x = 10, y = 33.9 }
+	m.ball.p = { x = 10, y = 34.0 }
 	m.ball.v = { x = 0, y = 6 }
 	m:update(1 / 30)
 	m.events = {}
@@ -1318,6 +1366,280 @@ do
 	check("横 → 反対の横 (0.25 秒間隔) = エラシコ", skillAfter({ { 0, -1 }, { 0, 1 } }, 0.25) == "elastico", skillAfter({ { 0, -1 }, { 0, 1 } }, 0.25))
 	check("前 → 横 (0.25 秒間隔) = シザーズ", skillAfter({ { 1, 0 }, { 0, 1 } }, 0.25) == "scissors")
 	check("前 → 後ろ → 横 (0.25 秒間隔) = マルセイユ", skillAfter({ { 1, 0 }, { -1, 0 }, { 0, 1 } }, 0.25) == "marseille")
+end
+
+print("== 練習モード ==")
+do
+	--- 練習を進める (結果待ちの間も含めて)。cond が真になるか maxSec で止める
+	local function run(pr, maxSec, cond)
+		for _ = 1, math.floor(maxSec * 30) do
+			if cond and cond() then
+				return true
+			end
+			pr:update(1 / 30)
+		end
+		return cond and cond() or false
+	end
+	local function ready(pr)
+		return function()
+			return pr.waitT == nil and pr.match.ball.owner ~= nil and pr.match.ball.owner == pr.seat.ctrl
+		end
+	end
+	local function holdP(pr, btn, sec)
+		pr.match:press(1, btn)
+		run(pr, sec)
+		pr.match:release(1, btn)
+	end
+
+	-- パス
+	local pr = Practice.new("pass", { random = lcg(901), assist = 1 })
+	check("パス練習: 味方 5 人と自分だけ", #pr.match:active(0) == 6 and #pr.match:active(1) == 1)
+	check("最初の目標がある", pr.highlight ~= nil)
+	for _ = 1, 12 do
+		if pr.done then
+			break
+		end
+		run(pr, 3, ready(pr))
+		local me, tg = pr.seat.ctrl, pr.highlight
+		pr.match:setAimPoint(1, tg.p.x, tg.p.y)
+		holdP(pr, "pass", 0.25)
+		run(pr, 4, function()
+			return pr.match.ball.owner ~= nil
+		end)
+	end
+	check("パス 10 本で完了", pr.done and pr.progress == 10, pr.progress)
+	check("記録はタイム", pr.result ~= nil and pr.result > 0, pr.result)
+
+	-- シュート
+	local ps = Practice.new("shoot", { random = lcg(902) })
+	check("シュート練習: 自分と GK だけ", #ps.match:active(0) == 1 and #ps.match:active(1) == 1)
+	for i = 1, 10 do
+		run(ps, 3, ready(ps))
+		ps.match:setAimPoint(1, 52.5, (i % 2 == 0) and 3.2 or -3.2)
+		holdP(ps, "shoot", 0.7)
+		run(ps, 7, function()
+			return ps.waitT ~= nil or ps.done
+		end)
+		run(ps, 2, function()
+			return ps.waitT == nil
+		end)
+	end
+	check("シュート 10 本で完了", ps.done and ps.progress == 10, ps.progress)
+	check("隅を狙えば入る (10 本中 2 本以上)", ps.score >= 2, ps.score)
+
+	-- 足技
+	local pk = Practice.new("skills", { random = lcg(903) })
+	local seqs = {
+		{ { 0, -1 } },
+		{ { 0, -1 }, { 0, 1 } },
+		{ { 1, 0 }, { 0, 1 } },
+		{ { 1, 0 }, { -1, 0 }, { 0, 1 } },
+		{ { -1, 0 } },
+	}
+	for _, seq in seqs do
+		run(pk, 3, ready(pk))
+		local p = pk.seat.ctrl
+		p.face = { x = 1, y = 0 }
+		p.v = { x = 0, y = 0 }
+		for i, f in seq do
+			pk.match:flick(1, f[1], f[2])
+			if i < #seq then
+				run(pk, 0.25)
+			end
+		end
+		run(pk, 1.5)
+	end
+	check("足技 5 種で完了", pk.done and pk.progress == 5, pk.progress)
+
+	-- FK
+	local pf = Practice.new("fk", { random = lcg(904) })
+	check("FK 練習: 壁がいる", #pf.match:active(1) >= 5 and pf.match.setp ~= nil and pf.match.setp.kind == "fk")
+	for i = 1, 5 do
+		run(pf, 3, function()
+			return pf.waitT == nil and pf.match.setp ~= nil
+		end)
+		pf.match:setAimPoint(1, 52.5, (i % 2 == 0) and 3 or -3)
+		holdP(pf, "shoot", 0.6)
+		run(pf, 8, function()
+			return pf.waitT ~= nil or pf.done
+		end)
+		run(pf, 2, function()
+			return pf.waitT == nil
+		end)
+	end
+	check("FK 5 本で完了", pf.done and pf.progress == 5, pf.progress)
+
+	-- 守備 (操作なし: AI の補助だけでも最後まで進む)
+	local pd = Practice.new("defend", { random = lcg(905) })
+	check("守備練習: 相手 2 人がボールを持って始まる", pd.match.ball.owner ~= nil and pd.match.ball.owner.team == 1)
+	run(pd, 5 * 17, function()
+		return pd.done
+	end)
+	check("守備 5 回で完了", pd.done and pd.progress == 5, pd.progress)
+
+	-- フリー練習
+	local pfree = Practice.new("free", { random = lcg(906), defenders = 3 })
+	check("フリー練習: 味方 11 人 + 相手 4 人 (GK + 3)", #pfree.match:active(0) == 11 and #pfree.match:active(1) == 4)
+	check("時間で終わらない", (function()
+		run(pfree, 30)
+		return not pfree.match.ended and pfree.match.mode == "play"
+	end)())
+	local m = pfree.match
+	m.setp = nil
+	m.ball.owner, m.ball.last = nil, m.teams[0][10]
+	m.ball.p = { x = 52.5, y = 0 }
+	m.ball.v = { x = 8, y = 0 }
+	m.ball.z = 0.5
+	pfree:update(1 / 30)
+	check("ゴール後はボールが足元に戻る", m.ball.owner == pfree.seat.ctrl and m.ball.owner.team == 0)
+
+	-- 自己ベスト
+	check("自己ベストの比較 (タイムは短い方)", Practice.better("pass", 20, 25) and not Practice.better("pass", 30, 25))
+	check("自己ベストの比較 (数は多い方)", Practice.better("shoot", 7, 5) and not Practice.better("shoot", 3, 5))
+	check("初回は自己ベスト", Practice.better("fk", 1, nil))
+end
+
+print("== パスを出した選手は自分のパスを追わない ==")
+do
+	local m = Match.new(cpuOpts(951))
+	clearOpponents(m)
+	local c = m.teams[0][10]
+	local r = m.teams[0][7]
+	c.p = { x = 0, y = 0 }
+	r.p = { x = 14, y = 10 }
+	m:gainBall(c)
+	m:kick("pass", { c = c, target = r })
+	local chased = false
+	for _ = 1, 30 do
+		m:update(1 / 30)
+		if m.chase[c] ~= nil then
+			chased = true
+		end
+		if m.ball.owner ~= nil then
+			break
+		end
+	end
+	check("出し手は追わない", not chased)
+	check("受け手が受ける", m.ball.owner == r, m.ball.owner and m.ball.owner.role)
+end
+
+print("== 本物のサッカーのルール ==")
+do
+	-- アディショナルタイムと上がっていく時計
+	local m = Match.new(cpuOpts(4242, { length = 180 }))
+	local m0 = m:clock()
+	check("時計は 0 分から", m0 < 0.1, m0)
+	local sawAdded, maxFirst = false, 0
+	while m.bIndex == 1 and not m.ended do
+		m:update(1 / 30)
+		if m.added > 0 then
+			sawAdded = true
+		end
+		if m.bIndex == 1 then
+			maxFirst = math.max(maxFirst, (m:clock()))
+		end
+	end
+	check("前半にアディショナルタイムが付く", sawAdded)
+	check("前半は 45 分を過ぎてから終わる", maxFirst > 45, maxFirst)
+	step(m, 30 * 6)
+	local c2 = m:clock()
+	check("後半は 45 分から", c2 >= 45 and c2 < 50, c2)
+
+	-- 自動交代
+	local subs = Match.new(cpuOpts(77, { length = 300 }))
+	for _, p in subs:active(0) do
+		if not p.gk then
+			p.stamina = 20
+		end
+	end
+	subs.elapsed = subs.nextSubCheck - 0.01
+	subs:update(1 / 30)
+	check("疲れた選手が交代する (1 回 2 人まで)", subs.subsUsed[0] == 2, subs.subsUsed[0])
+	local fresh, nums = 0, {}
+	for _, p in subs:active(0) do
+		if not p.gk and p.stamina >= 99 then
+			fresh += 1
+			nums[p.num] = true
+		end
+	end
+	check("交代した選手はスタミナ満タン・新しい背番号", fresh == 2 and nums[12] and nums[13])
+	for _ = 1, 10 do
+		subs:autoSubs(false)
+	end
+	check("交代は 5 人まで", subs.subsUsed[0] == 5, subs.subsUsed[0])
+
+	-- キックオフ: 相手はセンターサークルの外
+	local k = Match.new({ random = lcg(5) })
+	k:kickoff(0)
+	local inside = 0
+	for _, q in k:active(1) do
+		if math.sqrt(q.p.x ^ 2 + q.p.y ^ 2) < 9.15 then
+			inside += 1
+		end
+	end
+	check("キックオフ時、相手はセンターサークルの外", inside == 0, inside)
+
+	-- CK からはオフサイドにならない
+	local c = Match.new({ random = lcg(6) })
+	local s = c:seat(1)
+	c:startSetpiece("corner", 0, { x = 52, y = 33.5 }, "setp.corner")
+	step(c, 30)
+	local tgt = c.teams[0][10]
+	for _, q in c.teams[1] do
+		if not q.gk then
+			q.p = { x = 20, y = q.p.y }
+		end
+	end
+	tgt.p = { x = 50, y = 0 }
+	c:setAimPoint(1, 50, 0)
+	c:press(1, "lofted")
+	step(c, 6)
+	c:release(1, "lofted")
+	check("CK のボールにオフサイドは付かない", c.ball.offside == nil)
+
+	-- バックパスは GK が手で扱えない (手の届く距離が普通の選手と同じ)
+	local g = Match.new({ random = lcg(8) })
+	clearOpponents(g)
+	local gk = g.teams[0][1]
+	local mate = g.teams[0][3]
+	gk.p = { x = -50, y = 0 }
+	mate.p = { x = -40, y = 1.5 }
+	g:gainBall(mate)
+	g:kick("pass", { c = mate, target = gk })
+	g.ball.p = { x = -48.5, y = 1.5 }
+	g.ball.v = { x = -8, y = 0 }
+	g.ball.z, g.ball.vz = 0, 0
+	g:update(1 / 30)
+	check("バックパスはキャッチできない距離 (1.5 m) では取れない", g.ball.owner ~= gk)
+
+	-- アドバンテージ: 相手陣で倒されても味方がすぐ拾えるなら流す
+	local a = Match.new({ random = lcg(9) })
+	local victim, helper, fouler = a.teams[0][10], a.teams[0][9], a.teams[1][4]
+	for _, p in a.pl do
+		p.p = { x = -40, y = (p.team * 2 - 1) * 30 }
+	end
+	victim.p = { x = 20, y = 0 }
+	victim.stun = 0.8
+	helper.p = { x = 21.5, y = 0.5 }
+	fouler.p = { x = 19, y = -1.5 }
+	fouler.stun = 0.5
+	a.ball.owner = nil
+	a.ball.p = { x = 21, y = 0 }
+	a:foul(fouler, victim, 0)
+	check("アドバンテージなら試合を止めない", a.setp == nil)
+	victim.p = { x = -20, y = 0 }
+	a.ball.p = { x = -19, y = 0 }
+	helper.p = { x = -18.5, y = 0.5 }
+	a:foul(fouler, victim, 0)
+	check("自陣のファウルは FK", a.setp ~= nil and a.setp.kind == "fk")
+
+	-- ボール全体がラインを越えるまではインプレー
+	local o = Match.new({ random = lcg(10) })
+	o.ball.owner, o.ball.last = nil, o.teams[1][8]
+	o.ball.p = { x = 10, y = 33.95 }
+	o.ball.v = { x = 0, y = 0.3 }
+	o:update(1 / 30)
+	check("ボールの中心がラインを越えただけではアウトにならない", o.setp == nil)
 end
 
 print(("%d checks, %d failures"):format(checks, failures))

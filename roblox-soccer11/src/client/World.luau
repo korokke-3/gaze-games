@@ -19,6 +19,11 @@ local GOAL_W, GOAL_H = Config.Pitch.GoalWidth, Config.Pitch.GoalHeight
 local BOX_L, BOX_W = Config.Pitch.BoxLength, Config.Pitch.BoxWidth
 local SIX_L, SIX_W = Config.Pitch.SixLength, Config.Pitch.SixWidth
 local PEN_SPOT = Config.Pitch.PenaltySpot
+local CIRCLE_R = Config.Pitch.CenterRadius
+local CORNER_R = Config.Pitch.CornerRadius
+local POST_W = Config.Pitch.PostWidth
+-- ボールの見た目の直径 [m]。実物 (0.22m) だと引きのカメラでは見えないので約 1.6 倍
+local BALL_D = 0.35
 
 local function rgb(t)
 	return Color3.fromRGB(t[1], t[2], t[3])
@@ -98,7 +103,7 @@ local function buildPitch(folder)
 		local mid = (a + b) / 2
 		local p = newPart({
 			Name = "Line",
-			Size = Vector3.new(thick or 0.4, 0.05, len + (thick or 0.4)),
+			Size = Vector3.new(thick or 0.24, 0.05, len + (thick or 0.24)), -- 白線は 12cm
 			Color = WHITE,
 		}, folder)
 		p.CFrame = CFrame.lookAt(mid, b)
@@ -111,36 +116,69 @@ local function buildPitch(folder)
 	end
 	rect(-PL / 2, -PW / 2, PL / 2, PW / 2)
 	line(0, -PW / 2, 0, PW / 2)
-	-- センターサークル
-	local seg, r = 40, 9.15
-	for i = 0, seg - 1 do
-		local a0, a1 = 2 * math.pi * i / seg, 2 * math.pi * (i + 1) / seg
-		line(r * math.cos(a0), r * math.sin(a0), r * math.cos(a1), r * math.sin(a1))
+	-- 円弧 (中心 cx, cy、半径 r、角度 a0 〜 a1)
+	local function arc(cx, cy, r, a0, a1, seg)
+		for i = 0, seg - 1 do
+			local t0 = a0 + (a1 - a0) * i / seg
+			local t1 = a0 + (a1 - a0) * (i + 1) / seg
+			line(cx + r * math.cos(t0), cy + r * math.sin(t0), cx + r * math.cos(t1), cy + r * math.sin(t1))
+		end
+	end
+	local function spot(x, y)
+		newPart({
+			Name = "Spot",
+			Shape = Enum.PartType.Cylinder,
+			Size = Vector3.new(0.05, 0.44, 0.44),
+			CFrame = CFrame.new(toWorld(x, y, 0.1)) * CFrame.Angles(0, 0, math.rad(90)),
+			Color = WHITE,
+		}, folder)
+	end
+	-- センターサークルとセンターマーク
+	arc(0, 0, CIRCLE_R, 0, 2 * math.pi, 48)
+	spot(0, 0)
+	-- コーナーアークとコーナーフラッグ
+	for _, cx in { -1, 1 } do
+		for _, cy in { -1, 1 } do
+			local a = math.atan2(-cy, -cx)
+			arc(cx * PL / 2, cy * PW / 2, CORNER_R, a - math.pi / 4, a + math.pi / 4, 6)
+			newPart({
+				Name = "FlagPole",
+				Size = Vector3.new(0.1, 1.5 * S, 0.1),
+				Position = toWorld(cx * PL / 2, cy * PW / 2, 0.75 * S),
+				Color = Color3.fromRGB(240, 240, 240),
+			}, folder)
+			newPart({
+				Name = "Flag",
+				Size = Vector3.new(0.05, 0.5, 0.7),
+				Position = toWorld(cx * PL / 2, cy * PW / 2 + 0.2, 1.35 * S),
+				Color = Color3.fromRGB(250, 210, 40),
+			}, folder)
+		end
 	end
 	for _, sd in { -1, 1 } do
 		local gx = sd * PL / 2
 		rect(gx, -BOX_W / 2, gx - sd * BOX_L, BOX_W / 2)
 		rect(gx, -SIX_W / 2, gx - sd * SIX_L, SIX_W / 2)
-		newPart({
-			Name = "Spot",
-			Shape = Enum.PartType.Cylinder,
-			Size = Vector3.new(0.05, 1.2, 1.2),
-			CFrame = CFrame.new(toWorld(gx - sd * PEN_SPOT, 0, 0.1)) * CFrame.Angles(0, 0, math.rad(90)),
-			Color = WHITE,
-		}, folder)
+		local px = gx - sd * PEN_SPOT
+		spot(px, 0)
+		-- ペナルティアーク (PK スポットから 9.15m の円のうち、エリアの外側の部分)
+		local edge = BOX_L - PEN_SPOT
+		local h = math.acos(edge / CIRCLE_R)
+		local center = sd > 0 and math.pi or 0
+		arc(px, 0, CIRCLE_R, center - h, center + h, 16)
 		-- ゴール (ポスト・バー・ネット)
 		local postH = GOAL_H * S
 		for _, side in { -1, 1 } do
 			newPart({
 				Name = "Post",
-				Size = Vector3.new(0.7, postH, 0.7),
+				Size = Vector3.new(POST_W * S, postH, POST_W * S),
 				Position = toWorld(gx, side * GOAL_W / 2, postH / 2),
 				Color = Color3.fromRGB(245, 245, 245),
 			}, folder)
 		end
 		newPart({
 			Name = "Crossbar",
-			Size = Vector3.new(0.7, 0.7, GOAL_W * S + 0.7),
+			Size = Vector3.new(POST_W * S, POST_W * S, GOAL_W * S + POST_W * S),
 			Position = toWorld(gx, 0, postH),
 			Color = Color3.fromRGB(245, 245, 245),
 		}, folder)
@@ -200,7 +238,7 @@ function World.new(match, lang, style)
 		ring.Position = Vector3.new(0, -500, 0)
 
 		local num = billboard(anchor, UDim2.fromOffset(44, 22), Vector3.new(0, 2.1, 0))
-		newLabel(num, { Text = tostring(pl.num), TextColor3 = Color3.new(1, 1, 1) })
+		local numLabel = newLabel(num, { Text = tostring(pl.num), TextColor3 = Color3.new(1, 1, 1) })
 
 		local cursor = billboard(anchor, UDim2.fromOffset(160, 30), Vector3.new(0, 4.1, 0))
 		local cursorLabel = newLabel(cursor, { Text = "▼", TextColor3 = Color3.fromRGB(255, 255, 120) })
@@ -224,6 +262,7 @@ function World.new(match, lang, style)
 			nextMark = nextMark,
 			skill = skill,
 			skillLabel = skillLabel,
+			numLabel = numLabel,
 			action = nil,
 		}
 	end
@@ -232,7 +271,7 @@ function World.new(match, lang, style)
 	self.ball = newPart({
 		Name = "Ball",
 		Shape = Enum.PartType.Ball,
-		Size = Vector3.new(1.7, 1.7, 1.7),
+		Size = Vector3.new(BALL_D * S, BALL_D * S, BALL_D * S),
 		Color = ballStyle and rgb(ballStyle.color) or Color3.new(1, 1, 1),
 	}, self.folder)
 	if ballStyle and ballStyle.trail then
@@ -255,7 +294,7 @@ function World.new(match, lang, style)
 	self.ballShadow = newPart({
 		Name = "BallShadow",
 		Shape = Enum.PartType.Cylinder,
-		Size = Vector3.new(0.05, 1.6, 1.6),
+		Size = Vector3.new(0.05, BALL_D * S * 0.9, BALL_D * S * 0.9),
 		Color = Color3.fromRGB(25, 65, 25),
 	}, self.folder)
 
@@ -368,6 +407,10 @@ function World:step(dt, view)
 		end
 		local shirt = rgb(self:colorFor(pl))
 		Rig.setColors(a.rig, shirt, shirt:Lerp(Color3.new(0, 0, 0), 0.5))
+		local numText = tostring(pl.num)
+		if a.numLabel.Text ~= numText then
+			a.numLabel.Text = numText -- 交代で背番号が変わった
+		end
 		local ground = toWorld(pl.p.x, pl.p.y, 0)
 		local face = Vector3.new(pl.face.x, 0, pl.face.y)
 		local vel = Vector3.new(pl.v.x, 0, pl.v.y) * S
@@ -441,8 +484,8 @@ function World:step(dt, view)
 		end
 	end
 
-	-- ボール (高さは見た目を少し強調)
-	local bz = 0.9 + b.z * S * 0.8
+	-- ボール (地面に接して転がる。高さは実寸)
+	local bz = BALL_D * S / 2 + b.z * S
 	self.ball.Position = toWorld(b.p.x, b.p.y, bz)
 	self.ballShadow.CFrame = CFrame.new(toWorld(b.p.x, b.p.y, 0.1)) * CFrame.Angles(0, 0, math.rad(90))
 	if self.trail then

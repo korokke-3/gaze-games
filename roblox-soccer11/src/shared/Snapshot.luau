@@ -55,7 +55,7 @@ function Snapshot.encode(match, since)
 	table.insert(
 		parts,
 		string.pack(
-			"<fBBBBBBBBBBBB",
+			"<fBBBBBBBBBBBBHBB",
 			match.elapsed,
 			MODES[match.mode] or 0,
 			match.bIndex,
@@ -68,7 +68,10 @@ function Snapshot.encode(match, since)
 			sh and math.min(sh.goals[0], 254) or 255,
 			sh and math.min(sh.goals[1], 254) or 255,
 			match.level[0] + 2,
-			match.level[1] + 2
+			match.level[1] + 2,
+			match.clock and math.clamp(math.floor(select(1, match:clock()) * 60), 0, 65535) or 0,
+			match.clock and select(2, match:clock()) or 45,
+			math.min(match.added or 0, 255)
 		)
 	)
 	table.insert(
@@ -166,8 +169,10 @@ function Snapshot.decode(str)
 		return table.unpack(r, 1, r.n - 1)
 	end
 	local s = {}
-	local elapsed, mode, bIndex, period, flags, s0, s1, spKind, spTeam, g0, g1, l0, l1 = read("<fBBBBBBBBBBBB")
+	local elapsed, mode, bIndex, period, flags, s0, s1, spKind, spTeam, g0, g1, l0, l1, clockSec, endMin, added =
+		read("<fBBBBBBBBBBBBHBB")
 	s.elapsed = elapsed
+	s.clock = { minute = clockSec / 60, endMin = endMin, added = added }
 	s.mode = MODE_NAMES[mode] or "play"
 	s.bIndex = bIndex
 	s.period = period == 1 and "extra" or "regular"

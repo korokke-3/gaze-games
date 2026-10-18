@@ -611,20 +611,23 @@ function Hud:step(match, view)
 	local t = Locale.t
 	local myTeam = view.myTeam or 0
 	local s = match:seat(view.seatId)
-	local length = match.matchTime or Config.MatchTime
-	local remain = math.max(0, length - match.elapsed)
-	if match.period == "extra" then
-		remain = math.max(0, (match.boundaries and match.boundaries[match.bIndex] or length) - match.elapsed)
+	-- 試合内の時計 (0:00 から 90:00 へ上がっていく。アディショナルタイムは +N)
+	local minute, endMin, added = 0, 45, 0
+	if match.clock then
+		minute, endMin, added = match:clock()
 	end
-	local mm, ss = math.floor(remain / 60), math.floor(remain % 60)
+	local mm, ss = math.floor(minute), math.floor((minute % 1) * 60)
+	local clockText = string.format("%d:%02d", mm, ss)
+	if (added or 0) > 0 then
+		clockText ..= string.format(" +%d", added)
+	end
 	self.scoreText.Text = string.format(
-		"%s  %d - %d  %s    %d:%02d",
+		"%s  %d - %d  %s    %s",
 		self:teamName(match, 0, myTeam),
 		match.score[0],
 		match.score[1],
 		self:teamName(match, 1, myTeam),
-		mm,
-		ss
+		clockText
 	)
 
 	-- 前後半・延長・PK 戦

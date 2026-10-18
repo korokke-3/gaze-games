@@ -102,7 +102,11 @@ function RemoteMatch:apply(str, now)
 		end
 	end
 	for _, e in snap.events do
-		table.insert(self.events, { kind = e.kind, player = e.index and self.pl[e.index] or nil, tag = e.tag })
+		local who = e.index and self.pl[e.index] or nil
+		if e.kind == "sub" and who ~= nil then
+			who.num = tonumber(e.tag) or who.num -- 交代で背番号が変わる
+		end
+		table.insert(self.events, { kind = e.kind, player = who, tag = e.tag })
 	end
 end
 
@@ -159,6 +163,8 @@ function RemoteMatch:advance(now)
 	self.ball.v = { x = sb.ball.vx, y = sb.ball.vy }
 	self.ball.owner = sb.ball.owner > 0 and self.pl[sb.ball.owner] or nil
 	self.elapsed = lerp(sa.elapsed, sb.elapsed, t)
+	self.clockInfo = latest.clock
+	self.added = latest.clock and latest.clock.added or 0
 	-- 最新の値をそのまま使うもの
 	self.score = latest.score
 	self.level = latest.level
@@ -206,6 +212,14 @@ function RemoteMatch:advance(now)
 end
 
 -- ================================================================ Match と同じ問い合わせ
+function RemoteMatch:clock()
+	local c = self.clockInfo
+	if c == nil then
+		return 0, 45, 0
+	end
+	return c.minute, c.endMin, c.added
+end
+
 function RemoteMatch:human(team)
 	for _, s in self.seats do
 		if s.team == team then

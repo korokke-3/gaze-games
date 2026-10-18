@@ -27,6 +27,7 @@ for name, relative in (
     ("Match", "src/shared/Match.luau"),
     ("Snapshot", "src/shared/Snapshot.luau"),
     ("Bindings", "src/shared/Bindings.luau"),
+    ("Practice", "src/shared/Practice.luau"),
 ):
     parts.append(f"{name} = (function()\n{module_body(relative)}\nend)()")
 

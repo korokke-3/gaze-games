@@ -22,6 +22,20 @@ Config.Pitch = {
 	SixLength = 5.5, -- ゴールエリア
 	SixWidth = 18.3,
 	PenaltySpot = 11.0,
+	CenterRadius = 9.15, -- センターサークル / PK アーク / 壁までの距離
+	CornerRadius = 1.0,
+	BallRadius = 0.11, -- 5 号球 (直径 22cm)
+	PostWidth = 0.12,
+}
+
+-- 交代 (自動): 5 人まで、試合中は 3 回まで (ハーフタイムは数えない)
+Config.Subs = {
+	Max = 5,
+	Windows = 3,
+	PerWindow = 2,
+	Below = 45, -- これよりスタミナが少ない選手を代える
+	FirstCheck = 0.55, -- 試合時間のこの割合から交代を考える
+	CheckEvery = 0.12,
 }
 
 Config.Player = {

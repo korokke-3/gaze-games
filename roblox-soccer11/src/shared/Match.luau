@@ -60,6 +60,8 @@ local ATTRS = Config.Attributes
 local HALF_BREAK = Config.HalfTimeBreak
 local EXTRA = Config.ExtraTime
 local CTRL = Config.Controls
+local BALL_R = Config.Pitch.BallRadius -- ボール全体がラインを越えたら外 / ゴール
+local SUBS = Config.Subs
 
 local HOME, AWAY = 0, 1
 local KICKS = { pass = true, through = true, lofted = true, shoot = true }
@@ -185,6 +187,17 @@ function Match.new(opts)
 		[HOME] = Config.Formations[self.formKeys[HOME]] or FORM,
 		[AWAY] = Config.Formations[self.formKeys[AWAY]] or FORM,
 	}
+	-- 各フォーメーションの最終ライン (GK 以外で一番後ろ) の基準 x
+	self.backX = {}
+	for t = HOME, AWAY do
+		local mn = 0
+		for i, f in self.forms[t] do
+			if i > 1 then
+				mn = math.min(mn, f.x)
+			end
+		end
+		self.backX[t] = mn
+	end
 	self.diffIndex = opts.difficulty or Config.DefaultDifficulty
 	self.diff = DIFFS[self.diffIndex] or DIFFS[Config.DefaultDifficulty]
 	self.matchTime = opts.length or Config.MatchTime
@@ -265,6 +278,14 @@ function Match.new(opts)
 	self.modeT = 0
 	self.boundaries = { self.matchTime / 2, self.matchTime }
 	self.bIndex = 1
+	-- アディショナルタイム: 前後半の終わりに、止まった分 (得点・交代・カード) を足す
+	self.halfStart = 0
+	self.added = 0 -- 表示する追加の分数 (0 = まだ出ていない)
+	self.halfStops = 0
+	-- 交代 (自動。疲れた選手を控えと入れ替える)
+	self.subsUsed = { [HOME] = 0, [AWAY] = 0 }
+	self.subWindows = { [HOME] = 0, [AWAY] = 0 }
+	self.nextSubCheck = self.matchTime * SUBS.FirstCheck
 	self.period = "regular"
 	self.poss = { [HOME] = 0, [AWAY] = 0 }
 	self.tstats = {}
@@ -1156,6 +1177,25 @@ function Match:kick(kind, o)
 		local u = vnorm(vsub(tgt, c.p))
 		local spd = 15 + 17 * power
 		local dist = vdist(tgt, c.p)
+		local curl = o.curl
+		if o.style == "control" and (curl == nil or curl == 0) then
+			-- コントロールシュート: ゴールの外側へ蹴り出し、巻いて内側へ戻す (ファーへ巻く)
+			local out = tgt.y - g.y
+			if math.abs(out) < 0.5 then
+				out = -c.p.y
+			end
+			local n = { x = -u.y, y = u.x }
+			curl = math.abs(out) < 2 and 0 or ((-n.y * out) >= 0 and 1 or -1) -- 正面の真ん中狙いは巻かない
+			local a = math.abs(curl) * 5
+			if curl == 0 then
+				a = 0
+			end
+			local tf = dist / spd
+			local tc = math.min(tf, 1.2)
+			local off = 0.5 * a * tc * tc + a * tc * math.max(0, tf - tc)
+			local start = vsub(tgt, vmul(n, off * curl))
+			u = vnorm(vsub(start, c.p))
+		end
 		if o.style == "loop" then
 			local tf = clamp(dist / 14.0, 0.8, 2.0)
 			b.v = vmul(u, (dist / tf) * 0.95)
@@ -1170,8 +1210,8 @@ function Match:kick(kind, o)
 			local peak = 0.3 + 3.2 * math.max(0.0, power - 0.55) + math.abs(self:gauss() * 0.25)
 			b.z, b.vz = 0.1, (peak + 0.5 * GRAV * tf * tf) / math.max(tf, 0.1) * 0.5
 		end
-		if o.curl and o.curl ~= 0 then
-			b.curl, b.curlUntil = o.curl * 5, self.elapsed + 1.2
+		if curl and curl ~= 0 then
+			b.curl, b.curlUntil = curl * 5, self.elapsed + 1.2
 		end
 		b.target = nil
 	else
@@ -1239,7 +1279,8 @@ function Match:kick(kind, o)
 			b.curl, b.curlUntil = o.curl * 4, self.elapsed + 1.2
 		end
 		b.target = tgt
-		if tgt ~= nil then
+		-- 練習ドリルは守備が少ないのでオフサイドを取らない (フリー練習だけ取る)
+		if tgt ~= nil and (self.practice == nil or self.practice.kind == "free") then
 			local rx = s * tgt.p.x
 			if rx > 0 and rx > s * c.p.x and rx > self:secondLastX(c.team) + 0.3 then
 				b.offside = tgt
@@ -1558,8 +1599,10 @@ function Match:takeSetpiece(s, btn, power, mods)
 		end
 		self:doKick(s, btn, power, mods or {})
 	end
+	if sp.kind == "throw" or sp.kind == "corner" or sp.kind == "gk" then
+		self.ball.offside = nil -- スローイン・CK・ゴールキックからはオフサイドなし
+	end
 	if sp.kind == "throw" then
-		self.ball.offside = nil
 		self.ball.v = vmul(self.ball.v, 0.75) -- 投げるので短め
 		self.ball.z, self.ball.vz = 1.5, 1.5
 	end
@@ -1621,7 +1664,7 @@ function Match:cpuSetpiece()
 		self.kickTag = "throw"
 	end
 	self:kick(how, { c = taker, target = best })
-	if sp.kind == "throw" then
+	if sp.kind == "throw" or sp.kind == "corner" or sp.kind == "gk" then
 		self.ball.offside = nil
 	end
 end
@@ -1796,7 +1839,15 @@ function Match:setpieceTargets()
 	elseif sp.kind == "pk" then
 		for _, p in self.pl do
 			if not p.gk and p ~= sp.taker then
-				tg[p] = { x = clamp(p.p.x, -PL / 2 + BOX_L + 1, PL / 2 - BOX_L - 1), y = p.p.y }
+				-- エリアの外、かつペナルティアークの外 (PK スポットから 9.15m 以上)
+				local t = { x = clamp(p.p.x, -PL / 2 + BOX_L + 1, PL / 2 - BOX_L - 1), y = p.p.y }
+				local d = vdist(t, b.p)
+				if d < 9.6 then
+					local dir = d > 0.1 and vnorm(vsub(t, b.p)) or { x = -sA, y = 0 }
+					t = vadd(b.p, vmul(dir, 9.6))
+					t.x = clamp(t.x, -PL / 2 + BOX_L + 1, PL / 2 - BOX_L - 1)
+				end
+				tg[p] = t
 			end
 		end
 	end
@@ -1900,8 +1951,18 @@ function Match:shapeTargets(attOverride)
 					tg[p] = { x = b.p.x, y = b.p.y }
 				end
 			else
-				local push = bx * 0.55 + (attacking and 14 or -2) + TACTICS.Line[self.tactics[team].line] + self.level[team] * 4
-				local x = clamp(f.x + push, -PL / 2 + 6, PL / 2 - 4)
+				-- 最終ラインの高さをボール位置から決め、他の選手はラインからの距離で並べる
+				-- (イーフト / FIFA のミドルブロック: ボールが中央なら最終ラインは自陣ゴールから約 35 m、
+				--  チーム全体の縦幅は守備時 25〜30 m に圧縮)
+				local rel = f.x - self.backX[p.team]
+				local lineX
+				if attacking then
+					lineX = clamp(bx * 0.6 - 10, -PL / 2 + 14, 12)
+				else
+					lineX = clamp(bx * 0.6 - 18, -PL / 2 + 11, -3)
+				end
+				lineX += TACTICS.Line[self.tactics[team].line] + self.level[team] * 3
+				local x = clamp(lineX + rel * (attacking and 1.0 or 0.75), -PL / 2 + 6, PL / 2 - 4)
 				if not attacking then
 					local front = FWD[f.role] and 12 or 4
 					x = math.min(x, bx + front)
@@ -1913,6 +1974,48 @@ function Match:shapeTargets(attOverride)
 					x = math.min(x + 6, lim)
 				end
 				tg[p] = { x = s * x, y = clamp(y, -PW / 2 + 2, PW / 2 - 2) }
+			end
+		end
+	end
+	-- 守備側のマーク: ゾーンの近くにいる相手を 1 人ずつ受け持ち、ゴール側 2 m に付く
+	--   (FW は前に残す。遠すぎる相手は追わずにゾーンを守る)
+	for team = HOME, AWAY do
+		if att ~= team then
+			local ownGoal = vmul(self:oppGoal(team), -1)
+			local markers, runners = {}, {}
+			for _, p in self:active(team) do
+				local f = self.forms[p.team][p.i + 1]
+				if not p.gk and not FWD[f.role] and self:aiDriven(p) then
+					table.insert(markers, p)
+				end
+			end
+			for _, q in self:active(att) do
+				if not q.gk and q ~= b.owner and vdist(q.p, ownGoal) < 60 then
+					table.insert(runners, q)
+				end
+			end
+			local pairs_ = {}
+			for _, p in markers do
+				for _, q in runners do
+					local d = vdist(tg[p], q.p)
+					if d < 15 then
+						table.insert(pairs_, { p = p, q = q, d = d })
+					end
+				end
+			end
+			table.sort(pairs_, function(a, c)
+				return a.d < c.d
+			end)
+			local usedP, usedQ = {}, {}
+			for _, x in pairs_ do
+				if not usedP[x.p] and not usedQ[x.q] then
+					usedP[x.p], usedQ[x.q] = true, true
+					local side = vnorm(vsub(ownGoal, x.q.p))
+					local toBall = vnorm(vsub(b.p, x.q.p))
+					local spot = vadd(x.q.p, vadd(vmul(side, 2.0), vmul(toBall, 0.8)))
+					local w = x.d < 8 and 0.85 or 0.6
+					tg[x.p] = vadd(vmul(tg[x.p], 1 - w), vmul(spot, w))
+				end
 			end
 		end
 	end
@@ -2036,6 +2139,9 @@ function Match:planChasers()
 			end
 			if self:steering(p) then
 				skip = true -- 人間が動かしている選手は任せる
+			end
+			if p == b.kicker and b.target ~= nil and b.target ~= p and self.elapsed - b.kickT < 1.5 then
+				skip = true -- 自分の出したパスは追わない (受け手に任せる)
 			end
 			if not skip then
 				for _, f in fut do
@@ -2268,8 +2374,16 @@ function Match:update(dtRaw)
 	end
 	self.elapsed += dt
 	if self.mode == "play" and self.elapsed >= self.boundaries[self.bIndex] then
-		self:onBoundary()
-		return
+		if self.added == 0 and self.boundaries[self.bIndex] < 1e8 then
+			self:addStoppage()
+		else
+			self:onBoundary()
+			return
+		end
+	end
+	if self.mode == "play" and self.elapsed >= self.nextSubCheck then
+		self.nextSubCheck = self.elapsed + self.matchTime * SUBS.CheckEvery
+		self:autoSubs(false)
 	end
 	if self.mode == "shootout" then
 		self:updateShootout()
@@ -2484,16 +2598,38 @@ end
 --- severity: 1 = 悪質 (スライディング) / 小さいほど軽い接触。カードの出やすさに掛かる。
 function Match:foul(fouler, victim, severity)
 	self.tstats[fouler.team].fouls += 1
-	self:event("whistle")
 	self:cardCheck(fouler, severity or 1)
 	local team = victim.team
 	local s = self:sgn(team)
 	local inBox = s * victim.p.x > PL / 2 - BOX_L and math.abs(victim.p.y) < BOX_W / 2
+	if not inBox and self:advantage(team) then
+		self:popup("popup.advantage", team)
+		return
+	end
+	self:event("whistle")
 	if inBox then
 		self:startSetpiece("pk", team, { x = s * (PL / 2 - PEN_SPOT), y = 0 }, "popup.foul_pk")
 	else
 		self:startSetpiece("fk", team, victim.p, "popup.foul_fk")
 	end
+end
+
+--- アドバンテージ: 相手陣内で、倒された側の味方が一番ボールに近く、すぐ拾えるなら流す。
+function Match:advantage(team)
+	local b = self.ball
+	if self:sgn(team) * b.p.x < 0 then
+		return false
+	end
+	local best, bd = nil, math.huge
+	for _, p in self.pl do
+		if not p.out and p.stun <= 0 then
+			local d = vdist(p.p, b.p)
+			if d < bd then
+				best, bd = p, d
+			end
+		end
+	end
+	return best ~= nil and best.team == team and bd < 4
 end
 
 function Match:updateBall(dt)
@@ -2534,8 +2670,8 @@ function Match:updateBall(dt)
 		end
 	end
 	b.p = vadd(b.p, vmul(b.v, dt))
-	if self.mode == "shootout" and (math.abs(b.p.x) >= PL / 2 or math.abs(b.p.y) >= PW / 2) then
-		local scored = math.abs(b.p.x) >= PL / 2 and math.abs(b.p.y) < GOAL_W / 2 and b.z < GOAL_H
+	if self.mode == "shootout" and (math.abs(b.p.x) >= PL / 2 + BALL_R or math.abs(b.p.y) >= PW / 2 + BALL_R) then
+		local scored = math.abs(b.p.x) >= PL / 2 + BALL_R and math.abs(b.p.y) < GOAL_W / 2 and b.z < GOAL_H - BALL_R
 		b.v = { x = 0, y = 0 }
 		b.vz = 0
 		b.p.x = clamp(b.p.x, -PL / 2, PL / 2)
@@ -2543,11 +2679,12 @@ function Match:updateBall(dt)
 		self:shootResult(scored)
 		return
 	end
-	if math.abs(b.p.x) >= PL / 2 then
+	if math.abs(b.p.x) >= PL / 2 + BALL_R then
 		local side = b.p.x > 0 and 1 or -1
 		local att = (side == self:sgn(HOME)) and HOME or AWAY
-		if math.abs(b.p.y) < GOAL_W / 2 and b.z < GOAL_H then
+		if math.abs(b.p.y) < GOAL_W / 2 and b.z < GOAL_H - BALL_R then
 			self.score[att] += 1
+			self:stoppage(1)
 			self:popup("popup.goal", att)
 			self:event("goal")
 			self:startReplay(1 - att)
@@ -2566,7 +2703,7 @@ function Match:updateBall(dt)
 		end
 		return
 	end
-	if math.abs(b.p.y) >= PW / 2 then
+	if math.abs(b.p.y) >= PW / 2 + BALL_R then
 		local lastTeam = b.last ~= nil and b.last.team or HOME
 		self:startSetpiece(
 			"throw",
@@ -2601,7 +2738,9 @@ function Match:tryReceive()
 			local mine = b.kicker ~= nil and p.team == b.kicker.team
 			local reach = CONTROL_R
 			local hmax = 1.9
-			if p.gk and math.abs(p.p.x) > PL / 2 - BOX_L then
+			-- バックパス (味方が足で出したパス・スローイン) は手で扱えない
+			local backPass = mine and b.kicker ~= p and b.kind ~= "shot" and b.kind ~= "clear"
+			if p.gk and math.abs(p.p.x) > PL / 2 - BOX_L and not backPass then
 				reach, hmax = 1.7, 2.6
 				if p.dive ~= nil then
 					reach = 2.2
@@ -2785,6 +2924,7 @@ end
 
 function Match:showCard(p, kind)
 	self.tstats[p.team][kind] += 1
+	self:stoppage(0.5)
 	self:popup(kind == "yellow" and "popup.yellow" or "popup.red", 1 - p.team)
 	self:event("card")
 	if kind == "red" then
@@ -2828,6 +2968,75 @@ function Match:sendOff(p)
 	end
 end
 
+-- ================================================================ 時計 (アディショナルタイム)
+--- 1 分 (試合内の時計) が何秒か。
+function Match:secPerMinute()
+	if self.period == "extra" then
+		return EXTRA / 15
+	end
+	return self.matchTime / 90
+end
+
+--- 止まった分を数える (得点 1 分、交代・カード 0.5 分)。
+function Match:stoppage(minutes)
+	self.halfStops += minutes
+end
+
+function Match:addStoppage()
+	local mins = clamp(1 + math.floor(self.halfStops + self:rand()), 1, 6)
+	local sec = mins * self:secPerMinute()
+	for i = self.bIndex, #self.boundaries do
+		self.boundaries[i] += sec
+	end
+	self.added = mins
+	self:popup("popup.added", nil)
+end
+
+--- 試合内の時計。戻り値: 分 (小数), この前後半が終わる分, 追加の分数
+function Match:clock()
+	local base = ({ 0, 45, 90, 105 })[self.bIndex] or 0
+	local len = (self.bIndex <= 2) and 45 or 15
+	local minute = base + (self.elapsed - self.halfStart) / self:secPerMinute()
+	return minute, base + len, self.added
+end
+
+-- ================================================================ 交代
+--- 疲れた選手 (スタミナが少ない順) を控えと入れ替える。halftime: ハーフタイム (回数に数えない)
+function Match:autoSubs(halftime)
+	for team = HOME, AWAY do
+		if self.subsUsed[team] < SUBS.Max and (halftime or self.subWindows[team] < SUBS.Windows) then
+			local tired = {}
+			for _, p in self:active(team) do
+				if not p.gk and p.stamina < SUBS.Below then
+					table.insert(tired, p)
+				end
+			end
+			table.sort(tired, function(a, c)
+				return a.stamina < c.stamina
+			end)
+			local done = 0
+			for _, p in tired do
+				if self.subsUsed[team] >= SUBS.Max or done >= SUBS.PerWindow then
+					break
+				end
+				self.subsUsed[team] += 1
+				done += 1
+				p.stamina, p.exhausted = STAMINA.Max, false
+				p.yellow = 0 -- 新しい選手
+				p.num = 11 + self.subsUsed[team] -- 控えの背番号 12〜
+				self:event("sub", p, tostring(p.num))
+				self:stoppage(0.5)
+			end
+			if done > 0 then
+				if not halftime then
+					self.subWindows[team] += 1
+				end
+				self:popup("popup.sub", team)
+			end
+		end
+	end
+end
+
 -- ================================================================ 前後半・延長・PK 戦
 function Match:onBoundary()
 	local idx = self.bIndex
@@ -2838,8 +3047,8 @@ function Match:onBoundary()
 	elseif idx == 2 then
 		if self.cup and self.score[HOME] == self.score[AWAY] then
 			self.period = "extra"
-			table.insert(self.boundaries, self.matchTime + EXTRA)
-			table.insert(self.boundaries, self.matchTime + 2 * EXTRA)
+			table.insert(self.boundaries, self.elapsed + EXTRA)
+			table.insert(self.boundaries, self.elapsed + 2 * EXTRA)
 			self.bIndex = 3
 			self:startBreak("popup.extratime", HOME, false)
 		else
@@ -2858,6 +3067,8 @@ function Match:onBoundary()
 end
 
 function Match:startBreak(key, kickTeam, flip)
+	self.added, self.halfStops = 0, 0
+	self.halfStart = self.elapsed
 	self.mode = "halftime"
 	self.modeT = HALF_BREAK
 	self.pending = { kick = kickTeam, flip = flip }
@@ -2871,6 +3082,7 @@ function Match:startBreak(key, kickTeam, flip)
 			p.stamina = math.min(STAMINA.Max, p.stamina + STAMINA.HalfTimeRecover)
 			p.exhausted = false
 		end
+		self:autoSubs(true)
 	end
 end
 
@@ -2920,6 +3132,15 @@ function Match:kickoff(team)
 	end
 	for _, q in self:active(1 - team) do
 		q.cd = 1.5 -- キックオフ直後は相手がすぐに奪いに来ない
+		-- 相手はセンターサークルの外 (自陣) で待つ
+		local d = vlen(q.p)
+		if not q.gk and d < 9.5 then
+			if d < 0.1 then
+				q.p = { x = -self:sgn(q.team) * 9.5, y = 0 }
+			else
+				q.p = vmul(q.p, 9.5 / d)
+			end
+		end
 	end
 	-- 操作者の割り当て: キックオフするチームは最初の操作者が ST、他は近い選手
 	for _, p in self.pl do
