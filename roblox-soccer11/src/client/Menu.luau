@@ -157,6 +157,7 @@ local DEFAULTS = {
 	assist = Config.Controls.DefaultAssist,
 	mouseAim = true,
 	tipsDone = false,
+	tipSpin = false,
 	-- 練習の自己ベスト (0 = 記録なし)
 	pbPass = 0,
 	pbShoot = 0,
@@ -774,6 +775,7 @@ function Menu:_renderControls()
 	end)
 	if self.ctrlDevice == "kb" then
 		self:_fingerMap(b)
+		self:_pcHelp(b)
 	end
 	self:_skillHelp(b)
 	if self.ctrlDevice == "pad" then
@@ -833,6 +835,38 @@ function Menu:_renderControls()
 end
 
 --- 技の出し方 (進行方向に対して弾く向き)。キーボードは移動キーの 2 回押し、パッドは右スティック。
+--- PC (マウス) だけの操作: スワイプの回転と走り込みの指示。
+function Menu:_pcHelp(b)
+	local t = function(k, ...)
+		return Locale.t(self.lang, k, ...)
+	end
+	self:_header(t("pchelp.title"))
+	local run = Bindings.display(b.kb.runCall and b.kb.runCall[1])
+	for _, row in {
+		{ t("pchelp.side.k"), t("pchelp.side") },
+		{ t("pchelp.top.k"), t("pchelp.top") },
+		{ t("pchelp.back.k"), t("pchelp.back") },
+		{ run, t("pchelp.run") },
+	} do
+		local r = self:_row(40)
+		label(r, row[1], {
+			Position = UDim2.fromOffset(12, 0),
+			Size = UDim2.new(0.34, -12, 1, 0),
+			TextSize = 14,
+			TextWrapped = true,
+			ZIndex = 33,
+		})
+		label(r, row[2], {
+			Position = UDim2.new(0.34, 0, 0, 0),
+			Size = UDim2.new(0.66, -12, 1, 0),
+			TextSize = 13,
+			TextWrapped = true,
+			TextColor3 = Color3.fromRGB(200, 230, 210),
+			ZIndex = 33,
+		})
+	end
+end
+
 function Menu:_skillHelp(b)
 	local t = function(k, ...)
 		return Locale.t(self.lang, k, ...)

@@ -144,12 +144,36 @@ local okF, errF = pcall(function()
 	end
 	first.fn()
 	Frames(60)
+	-- マウスのスワイプで回転: 溜めて、離す直前に素早く払う
+	Fire("InputChanged", { UserInputType = Enum.UserInputType.MouseMovement, Position = Vector3.new(760, 360, 0) }, false)
+	MouseLoc = Vector2.new(760, 360)
+	Frames(5)
+	Fire("InputBegan", { UserInputType = Enum.UserInputType.MouseButton1 }, false)
+	Frames(10)
+	MouseLoc = Vector2.new(760, 300)
+	Frames(1)
+	MouseLoc = Vector2.new(760, 200)
+	Frames(1)
+	Fire("InputEnded", { UserInputType = Enum.UserInputType.MouseButton1 })
+	Frames(2)
+	for _, d in game:GetService("Workspace"):GetDescendants() do
+		local tx = d._p.Text
+		if d._p.ClassName == "TextLabel" and (tx == "Curl" or tx == "Driven" or tx == "Backspin") and d.Parent and d.Parent._p.Enabled then
+			SawSpin = tx
+		end
+	end
+	MouseLoc = nil
+	Frames(30)
+	Press("G") -- 走り込みの指示
+	Release("G")
+	Frames(5)
 	Press("J")
 	Frames(10)
 	Release("J")
 	Frames(30)
 end)
 Check("フリー練習を始めて動かせる", okF, errF)
+Check("マウスを払って離すと回転が掛かる (頭上に表示)", SawSpin ~= nil, SawSpin)
 Check("練習はサーバーに試合開始を送らない (報酬なし)", #CallsOf("MatchStarted") == startsBefore)
 FindButton("II").fn()
 local restart = FindButton("Restart drill")

@@ -44,6 +44,11 @@ local MOVES = {
 	moveLeft = { -1, 0 },
 	moveRight = { 1, 0 },
 }
+-- マウスのスワイプで回転: 離す直前 SWIPE_T 秒の動きを見る。SWIPE_FULL [m] 動かすと最大の回転
+local KICK_BUTTONS = { pass = true, through = true, lofted = true, shoot = true }
+local SWIPE_T = 0.14
+local SWIPE_FULL = 8.0
+
 local Input = {}
 Input.__index = Input
 
@@ -65,6 +70,9 @@ function Input.localSink(match, seatId)
 		release = function(_, b)
 			match:release(seatId, b)
 		end,
+		spin = function(_, side, top)
+			match:spin(seatId, side, top)
+		end,
 		flick = function(_, x, y)
 			match:flick(seatId, x, y)
 		end,
@@ -85,8 +93,10 @@ function Input.netSink(send)
 			point = st.point,
 			buttons = st.buttons,
 			flick = extra and extra.flick,
+			spin = st.spin,
 			cmd = extra and extra.cmd,
 		})
+		st.spin = nil
 		send(packet)
 		st.dirty = false
 		st.keep = 0
@@ -133,6 +143,9 @@ function Input.netSink(send)
 		release = function(_, b)
 			st.buttons[b] = nil
 			flush()
+		end,
+		spin = function(_, side, top)
+			st.spin = { side = side, top = top } -- 次の送信 (直後の release) に載せる
 		end,
 		flick = function(_, x, y)
 			flush({ flick = { x = x, y = y } })
@@ -181,6 +194,8 @@ function Input.new(opts)
 	self.rs = { x = 0, y = 0, armed = true } -- ゲームパッドの右スティック
 	self.lastMouseMove = -99
 	self.mouseHeld = false
+	self.mouseHist = {} -- { t, sx, sy, point } (スワイプの判定用、直近 0.4 秒)
+	self.lastSpin = nil
 	self.lastMove = { x = 0, y = 0 }
 	self.lastAim = nil
 	self.device = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled and "touch" or "keyboard"
@@ -228,6 +243,9 @@ function Input:_buttonUp(b)
 	if n <= 0 then
 		if self.buttons[b] ~= nil then
 			self.buttons[b] = nil
+			if KICK_BUTTONS[b] then
+				self:_swipeSpin()
+			end
 			self.sink:release(b)
 		end
 	else
@@ -312,6 +330,56 @@ function Input:_changed(input, processed)
 	end
 end
 
+--[[
+	キックを離した瞬間のマウスのスワイプを回転にする (PC だけの操作)。
+	  狙い: スワイプを始める前に指していた地点
+	  狙いに対して横へ払う = 横回転 (払った側へ曲がる)
+	  狙いの方へ払う = 順回転 (低く速い) / 手前へ引く = 逆回転 (浮いて止まる)
+]]
+function Input:_swipeSpin()
+	if self.device ~= "keyboard" or self.opts.mouseAim == false or UserInputService.MouseEnabled == false then
+		return
+	end
+	local hist = self.mouseHist
+	if #hist < 2 then
+		return
+	end
+	local now = self.clock
+	local m = UserInputService:GetMouseLocation()
+	local curPoint = self:_mousePoint()
+	local pre = hist[1]
+	for i = #hist, 1, -1 do
+		if now - hist[i].t >= SWIPE_T then
+			pre = hist[i]
+			break
+		end
+	end
+	local cam = workspace.CurrentCamera
+	local vpY = cam and cam.ViewportSize.Y or 720
+	local dx, dy = m.X - pre.sx, m.Y - pre.sy
+	if math.sqrt(dx * dx + dy * dy) < math.max(30, vpY * 0.045) or pre.point == nil or curPoint == nil then
+		return
+	end
+	local pos = self.opts.ctrlPos and self.opts.ctrlPos()
+	if pos == nil then
+		return
+	end
+	local target = pre.point
+	local ux, uy = target.x - pos.x, target.y - pos.y
+	local ul = math.sqrt(ux * ux + uy * uy)
+	if ul < 0.5 then
+		return
+	end
+	ux, uy = ux / ul, uy / ul
+	local mx, my = curPoint.x - target.x, curPoint.y - target.y
+	local side = math.clamp((mx * -uy + my * ux) / SWIPE_FULL, -1, 1)
+	local top = math.clamp((mx * ux + my * uy) / SWIPE_FULL, -1, 1)
+	self.sink:setAimPoint(target.x, target.y)
+	self.sink:spin(side, top)
+	self.used.spin = true
+	self.lastSpin = { side = side, top = top, t = now }
+end
+
 --- 割り当てられた操作を実行する。
 function Input:_action(action, down)
 	if action == nil then
@@ -356,6 +424,15 @@ function Input:_action(action, down)
 		end
 	elseif action == "levelUp" or action == "levelDown" then
 		self.sink:command(action)
+	elseif action == "runCall" then
+		-- 走り込みの指示: マウスの指す地点へ (パッドは前線の味方が裏へ)
+		local pt = self.point
+		if pt ~= nil then
+			self.sink:command(string.format("run:%.1f,%.1f", pt.x, pt.y))
+		else
+			self.sink:command("run:")
+		end
+		self.used.runCall = true
 	end
 end
 
@@ -398,6 +475,14 @@ function Input:update(dt)
 	end
 	self.sink:setAim(nil)
 	self.point = point
+	-- スワイプ判定用の履歴
+	if point ~= nil then
+		local m = UserInputService:GetMouseLocation()
+		table.insert(self.mouseHist, { t = self.clock, sx = m.X, sy = m.Y, point = point })
+		while #self.mouseHist > 0 and self.clock - self.mouseHist[1].t > 0.4 do
+			table.remove(self.mouseHist, 1)
+		end
+	end
 	local pos = self.opts.ctrlPos and self.opts.ctrlPos()
 	if point ~= nil and pos ~= nil then
 		self.lastAim = { x = point.x - pos.x, y = point.y - pos.y }

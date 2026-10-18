@@ -136,7 +136,7 @@ local services = {
 		InputChanged = NewSignal(nil, "InputChanged"),
 		TouchStarted = NewSignal(nil, "TouchStarted"),
 		GetMouseLocation = function()
-			return Vector2.new(640, 360)
+			return MouseLoc or Vector2.new(640, 360)
 		end,
 	},
 	MarketplaceService = market,

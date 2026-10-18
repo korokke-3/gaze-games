@@ -251,7 +251,11 @@ function Snapshot.packInput(input)
 			mask += 2 ^ (i - 1)
 		end
 	end
-	local flags = (input.aim ~= nil and 1 or 0) + (input.point ~= nil and 2 or 0)
+	local flags = (input.aim ~= nil and 1 or 0) + (input.point ~= nil and 2 or 0) + (input.spin ~= nil and 4 or 0)
+	local ss, st = 0, 0
+	if input.spin ~= nil then
+		ss, st = input.spin.side, input.spin.top
+	end
 	local ax, ay = 0, 0
 	if input.aim ~= nil then
 		ax, ay = input.aim.x, input.aim.y
@@ -265,7 +269,7 @@ function Snapshot.packInput(input)
 		fx, fy = input.flick.x, input.flick.y
 	end
 	return string.pack(
-		"<bbBbbhhBbbs1",
+		"<bbBbbhhBbbbbs1",
 		q(input.move.x, 127, -127, 127),
 		q(input.move.y, 127, -127, 127),
 		flags,
@@ -276,15 +280,17 @@ function Snapshot.packInput(input)
 		mask,
 		q(fx, 127, -127, 127),
 		q(fy, 127, -127, 127),
+		q(ss, 127, -127, 127),
+		q(st, 127, -127, 127),
 		input.cmd or ""
 	)
 end
 
 function Snapshot.unpackInput(str)
-	if type(str) ~= "string" or #str < 13 or #str > 64 then
+	if type(str) ~= "string" or #str < 15 or #str > 64 then
 		return nil
 	end
-	local ok, mx, my, flags, ax, ay, px, py, mask, fx, fy, cmd = pcall(string.unpack, "<bbBbbhhBbbs1", str)
+	local ok, mx, my, flags, ax, ay, px, py, mask, fx, fy, ss, st, cmd = pcall(string.unpack, "<bbBbbhhBbbbbs1", str)
 	if not ok then
 		return nil
 	end
@@ -300,6 +306,7 @@ function Snapshot.unpackInput(str)
 		point = bit32.band(flags, 2) ~= 0 and { x = px / 10, y = py / 10 } or nil,
 		buttons = buttons,
 		flick = (fx ~= 0 or fy ~= 0) and { x = fx / 127, y = fy / 127 } or nil,
+		spin = bit32.band(flags, 4) ~= 0 and { side = ss / 127, top = st / 127 } or nil,
 		cmd = cmd ~= "" and cmd or nil,
 	}
 end
@@ -316,6 +323,9 @@ function Snapshot.applyInput(match, seatId, input, prevButtons)
 		match:setAimPoint(seatId, input.point.x, input.point.y)
 	else
 		match:setAimPoint(seatId, nil)
+	end
+	if input.spin ~= nil then
+		match:spin(seatId, input.spin.side, input.spin.top) -- 離す前に回転を渡す
 	end
 	-- 押した順を保つため、修飾ボタン (l1/r1/dash/l2) を先に処理する
 	local order = { "dash", "l1", "r1", "l2", "pass", "through", "lofted", "shoot" }

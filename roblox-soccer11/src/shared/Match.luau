@@ -102,6 +102,60 @@ end
 local function lerp(a, b, t)
 	return a + (b - a) * t
 end
+--- 回転で曲がる分だけ、蹴り出す向きを外側へずらす (狙った地点を通るように)。
+--- 実際のボールの動き (横の加速・転がりの減速) を短く計算して、向きを 3 回合わせる。
+--- from: 蹴る位置, dest: 狙い, speed: 初速, accel: 横加速度 (符号つき。+ は進行方向の左), ground: 転がる (摩擦あり)
+local CURL_TIME = 1.2
+local function curlStart(from, dest, speed, accel, ground)
+	local dx, dy = dest.x - from.x, dest.y - from.y
+	local dist = math.sqrt(dx * dx + dy * dy)
+	if dist < 1e-6 or accel == 0 or speed <= 0 then
+		return { x = dx, y = dy }
+	end
+	local ux, uy = dx / dist, dy / dist
+	local base = math.atan2(uy, ux)
+	-- 角度 ang で蹴った時、狙いの距離まで進んだ所での横のずれ (+ = 左)
+	local function lateral(ang)
+		local px, py = 0, 0
+		local vx, vy = math.cos(ang) * speed, math.sin(ang) * speed
+		local t, dt = 0, 1 / 30
+		for _ = 1, 150 do
+			local sp = math.sqrt(vx * vx + vy * vy)
+			if t < CURL_TIME and sp > 4 then
+				vx, vy = vx - vy / sp * accel * dt, vy + vx / sp * accel * dt
+			end
+			if ground then
+				sp = math.sqrt(vx * vx + vy * vy)
+				if sp < 0.3 then
+					break
+				end
+				local k = math.max(0, sp - FRICTION * dt) / sp
+				vx, vy = vx * k, vy * k
+			end
+			px += vx * dt
+			py += vy * dt
+			t += dt
+			if px * ux + py * uy >= dist then
+				break
+			end
+		end
+		return -px * uy + py * ux
+	end
+	local a0 = base - (accel > 0 and 1 or -1) * 0.1
+	local e0 = lateral(a0)
+	local a1 = a0 - e0 / dist
+	for _ = 1, 3 do
+		local e1 = lateral(a1)
+		if math.abs(e1) < 0.05 or math.abs(e1 - e0) < 1e-6 then
+			break
+		end
+		local a2 = a1 - e1 * (a1 - a0) / (e1 - e0)
+		a0, e0, a1 = a1, e1, a2
+	end
+	a1 = clamp(a1, base - 0.6, base + 0.6)
+	return { x = math.cos(a1), y = math.sin(a1) }
+end
+
 local function sgnOf(x)
 	if x > 0 then
 		return 1
@@ -393,6 +447,12 @@ function Match:popup(key, team)
 	table.insert(self.popups, { t = self.elapsed, key = key, team = team, seq = self.seq })
 end
 
+--- 選手の頭上に一瞬出す文字 (技名・回転・走り込み)。
+function Match:label(p, key)
+	self.seq += 1
+	table.insert(self.labels, { t = self.elapsed, key = key, player = p, seq = self.seq })
+end
+
 --- 効果音・動作のイベント。player = 動作した選手、tag = 動作の種類 (キックなら pass / shot / ...)
 function Match:event(kind, player, tag)
 	table.insert(self.events, { kind = kind, player = player, tag = tag })
@@ -565,7 +625,49 @@ function Match:command(id, cmd)
 		if self.mode == "replay" then
 			self:endReplay()
 		end
+	elseif string.sub(cmd, 1, 4) == "run:" then
+		local x, y = string.match(cmd, "^run:(%-?[%d%.]+),(%-?[%d%.]+)$")
+		self:callRun(s, tonumber(x), tonumber(y))
 	end
+end
+
+--- 走り込みの指示 (PC: G で、マウスの指す地点へ一番近い味方を走らせる)。地点が無ければ前線の味方が裏へ。
+function Match:callRun(s, x, y)
+	local owner = self.ball.owner
+	if owner == nil or owner.team ~= s.team or self.mode ~= "play" or self.setp ~= nil then
+		return
+	end
+	local to
+	if x ~= nil and y ~= nil and x == x and y == y then
+		to = { x = clamp(x, -PL / 2 + 1, PL / 2 - 1), y = clamp(y, -PW / 2 + 1, PW / 2 - 1) }
+	else
+		local sg = self:sgn(s.team)
+		to = { x = clamp(owner.p.x + sg * 18, -PL / 2 + 2, PL / 2 - 2), y = owner.p.y * 0.5 }
+	end
+	local best, bd = nil, math.huge
+	for _, p in self:active(s.team) do
+		if p ~= owner and not p.gk and p.seat == nil then
+			local d = vdist(p.p, to)
+			if d < bd then
+				best, bd = p, d
+			end
+		end
+	end
+	if best == nil or bd > 30 then
+		return
+	end
+	best.run = { to = to, untilT = self.elapsed + 3.5 }
+	self:event("call", best)
+	self:label(best, "label.run")
+end
+
+--- PC のスワイプで付けた回転 (次に離すキックに使う)。side: 横回転 -1〜1 (+ = 狙いの左へ曲がる)、top: + 順回転 / - 逆回転
+function Match:spin(id, side, top)
+	local s = self.seatById[id]
+	if s == nil or type(side) ~= "number" or type(top) ~= "number" or side ~= side or top ~= top then
+		return
+	end
+	s.spinNext = { side = clamp(side, -1, 1), top = clamp(top, -1, 1), t = self.elapsed }
 end
 
 --- 攻撃中か (自分の操作選手がボールを持っている)。
@@ -682,6 +784,24 @@ function Match:release(id, btn)
 		local side = vdot(s.move, { x = -aim.y, y = aim.x })
 		if math.abs(side) > 0.4 then
 			ch.curl = sgnOf(side)
+		end
+	end
+	local sp = s.spinNext
+	s.spinNext = nil
+	if sp ~= nil and self.elapsed - sp.t < 0.5 then
+		ch.curl = math.abs(sp.side) > 0.08 and sp.side or ch.curl
+		ch.mods.top = math.abs(sp.top) > 0.08 and sp.top or nil
+		-- どの回転が掛かったかを頭上に出す
+		local key = nil
+		if math.abs(sp.side) >= math.abs(sp.top) and math.abs(sp.side) > 0.08 then
+			key = "label.spin.curl"
+		elseif sp.top > 0.08 then
+			key = "label.spin.top"
+		elseif sp.top < -0.08 then
+			key = "label.spin.back"
+		end
+		if key and s.ctrl then
+			self:label(s.ctrl, key)
 		end
 	end
 	ch.mods.curl = ch.curl
@@ -1058,7 +1178,7 @@ function Match:doKick(s, btn, power, mods)
 			aimY = dir.y * GOAL_W / 2
 		end
 		aimY = clamp(aimY, -GOAL_W / 2 - 2.5, GOAL_W / 2 + 2.5)
-		self:kick("shot", { c = p, power = power, aimY = aimY, style = style, curl = mods.curl })
+		self:kick("shot", { c = p, power = power, aimY = aimY, style = style, curl = mods.curl, top = mods.top })
 		return
 	end
 	local kind = btn == "lofted" and "lofted" or btn
@@ -1075,6 +1195,7 @@ function Match:doKick(s, btn, power, mods)
 		stun = mods.stun,
 		manual = recv == nil,
 		curl = mods.curl,
+		top = mods.top,
 	})
 	-- 蹴った瞬間に、操作を受け手へ移す (eFootball と同じ)
 	if recv ~= nil and recv.seat == nil then
@@ -1178,6 +1299,10 @@ function Match:kick(kind, o)
 		local spd = 15 + 17 * power
 		local dist = vdist(tgt, c.p)
 		local curl = o.curl
+		local top = o.top or 0
+		if top > 0 then
+			spd *= 1 + 0.08 * top -- 順回転: 速く、落ちる
+		end
 		if o.style == "control" and (curl == nil or curl == 0) then
 			-- コントロールシュート: ゴールの外側へ蹴り出し、巻いて内側へ戻す (ファーへ巻く)
 			local out = tgt.y - g.y
@@ -1186,15 +1311,10 @@ function Match:kick(kind, o)
 			end
 			local n = { x = -u.y, y = u.x }
 			curl = math.abs(out) < 2 and 0 or ((-n.y * out) >= 0 and 1 or -1) -- 正面の真ん中狙いは巻かない
-			local a = math.abs(curl) * 5
-			if curl == 0 then
-				a = 0
-			end
-			local tf = dist / spd
-			local tc = math.min(tf, 1.2)
-			local off = 0.5 * a * tc * tc + a * tc * math.max(0, tf - tc)
-			local start = vsub(tgt, vmul(n, off * curl))
-			u = vnorm(vsub(start, c.p))
+		end
+		if curl ~= nil and curl ~= 0 then
+			-- 曲がって狙った所へ戻るよう、外側へ蹴り出す (スワイプの強さで曲がり具合が変わる)
+			u = vnorm(curlStart(c.p, tgt, spd, curl * 5, false))
 		end
 		if o.style == "loop" then
 			local tf = clamp(dist / 14.0, 0.8, 2.0)
@@ -1208,10 +1328,15 @@ function Match:kick(kind, o)
 			b.v = vmul(u, spd)
 			local tf = dist / spd
 			local peak = 0.3 + 3.2 * math.max(0.0, power - 0.55) + math.abs(self:gauss() * 0.25)
+			if top > 0 then
+				peak *= 1 - 0.55 * top -- 順回転: 低く抑える (ふかしにくい)
+			elseif top < 0 then
+				peak += 1.4 * -top -- 逆回転: 浮く
+			end
 			b.z, b.vz = 0.1, (peak + 0.5 * GRAV * tf * tf) / math.max(tf, 0.1) * 0.5
 		end
 		if curl and curl ~= 0 then
-			b.curl, b.curlUntil = curl * 5, self.elapsed + 1.2
+			b.curl, b.curlUntil = curl * 5, self.elapsed + CURL_TIME
 		end
 		b.target = nil
 	else
@@ -1261,22 +1386,46 @@ function Match:kick(kind, o)
 		dest.y = clamp(dest.y, -PW / 2 - 3, PW / 2 + 3)
 		local dist = vdist(dest, c.p)
 		local u = vnorm(vsub(dest, c.p))
+		local top = o.top or 0
+		local curlA = (o.curl and o.curl ~= 0) and o.curl * 4 or 0
+		b.landDamp = nil
 		if lofted then
 			local T = clamp(dist / 20.0, 0.7, 2.2)
+			if top < 0 then
+				T *= 1 + 0.35 * -top -- 逆回転: 高く上がり、落ちたら止まる
+				b.landDamp = 0.75 - 0.4 * -top
+			elseif top > 0 then
+				T *= 1 - 0.2 * top -- 順回転: 低く速く、落ちてからも転がる
+				b.landDamp = 0.75 + 0.1 * top
+			end
+			if curlA ~= 0 then
+				u = vnorm(curlStart(c.p, dest, dist / T, curlA, false))
+			end
 			b.v = vmul(u, dist / T)
 			b.z, b.vz = 0.1, 0.5 * GRAV * T
 		else
 			-- 受け手へは勢いを残して届ける。空いた地点へは、そこで止まる程度に
 			local arrive = (tgt == nil and o.dest ~= nil) and 1.0 or 3.5
-			local v0 = math.sqrt(2 * FRICTION * dist) + arrive
-			b.v = vmul(u, math.min(v0, 28.0))
+			local v0 = math.min(math.sqrt(2 * FRICTION * dist) + arrive, 28.0)
+			if top > 0 then
+				v0 = math.min(v0 * (1 + 0.15 * top), 30.0) -- 順回転: 強く速いグラウンダー
+			end
+			if curlA ~= 0 then
+				u = vnorm(curlStart(c.p, dest, v0, curlA, true))
+			end
+			b.v = vmul(u, v0)
 			b.z, b.vz = 0, 0
+			if top < 0 then
+				-- 逆回転: 浮かせた短いチップパス (相手の足を越える)
+				b.z, b.vz = 0.1, 3.0 * -top
+				b.v = vmul(b.v, 1 - 0.12 * -top)
+			end
 		end
 		if o.stun then
 			b.v = vmul(b.v, 1.25)
 		end
-		if o.curl and o.curl ~= 0 then
-			b.curl, b.curlUntil = o.curl * 4, self.elapsed + 1.2
+		if curlA ~= 0 then
+			b.curl, b.curlUntil = curlA, self.elapsed + CURL_TIME
 		end
 		b.target = tgt
 		-- 練習ドリルは守備が少ないのでオフサイドを取らない (フリー練習だけ取る)
@@ -1323,6 +1472,7 @@ function Match:gainBall(p)
 	b.z, b.vz = 0, 0
 	b.target, b.offside = nil, nil
 	b.curl, b.curlUntil = 0, -1
+	b.landDamp = nil
 	if p.seat == nil then
 		-- 人間のチーム: 出し手の操作者 → 一番近い操作者 の順で、受けた選手に切り替える
 		local best, bd = nil, math.huge
@@ -2661,7 +2811,10 @@ function Match:updateBall(dt)
 		if b.z <= 0 then
 			b.z = 0
 			b.vz = math.abs(b.vz) > 2.5 and -b.vz * 0.35 or 0
-			b.v = vmul(b.v, 0.75)
+			b.v = vmul(b.v, b.landDamp or 0.75) -- 回転: 逆回転は止まり、順回転は転がる
+			if b.vz == 0 then
+				b.landDamp = nil -- 弾み終わった
+			end
 		end
 	else
 		local sp = vlen(b.v)

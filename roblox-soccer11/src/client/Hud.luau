@@ -25,7 +25,7 @@ local Bindings = require(Shared:WaitForChild("Bindings"))
 -- 操作ガイド: { 表記の作り方, 説明のキー }
 --   { "pass" }            その操作のキー
 --   { "l1", "+", "pass" }  組み合わせ (各操作の 1 つ目のキー)
---   "aim" / "flick" / "flickLR" / "moves" / "zoom"  特別な表記
+--   "aim" / "flick" / "flickLR" / "moves" / "zoom" / "swipe"  特別な表記
 local GUIDE = {
 	attack = {
 		{ "aim", "guide.aim" },
@@ -36,6 +36,8 @@ local GUIDE = {
 		{ { "dash" }, "guide.dash" },
 		{ { "l1", "+", "pass" }, "guide.l1" },
 		{ { "r1", "+", "shoot" }, "guide.r1" },
+		{ "swipe", "guide.swipe" },
+		{ { "runCall" }, "guide.runcall" },
 		{ "flick", "guide.feint" },
 		{ "zoom", "guide.zoom" },
 	},
@@ -477,6 +479,9 @@ function Hud:_glyph(spec, device)
 		return dev == "pad" and "RS" or (first("moveLeft") .. " / " .. first("moveRight"))
 	elseif spec == "zoom" then
 		return dev == "pad" and "—" or "Wheel"
+	elseif spec == "swipe" then
+		-- PC: 離す瞬間にマウスを払う / パッド: 溜め中に右スティック
+		return (dev == "kb" and self.mouseAim) and "Swipe" or (dev == "pad" and "RS" or (first("moveLeft") .. " / " .. first("moveRight")))
 	end
 	if #spec == 1 then
 		return Bindings.label(b, dev, spec[1])
@@ -538,7 +543,7 @@ function Hud:_renderGuide(context, device)
 		if device == "keyboard" then
 			local spec = row[1]
 			local firstKey = nil
-			if spec == "aim" then
+			if spec == "aim" or spec == "swipe" then
 				firstKey = self.mouseAim and "MouseButton1" or "W"
 				if self.mouseAim then
 					fingerCol = Bindings.FINGER_COLORS.rindex
@@ -576,7 +581,7 @@ function Hud:_renderGuide(context, device)
 			TextScaled = false,
 			TextSize = 13,
 			TextXAlignment = Enum.TextXAlignment.Left,
-			Text = Locale.t(self.lang, row[2]),
+			Text = Locale.t(self.lang, (row[1] == "swipe" and not (device == "keyboard" and self.mouseAim)) and "guide.sp.curl" or row[2]),
 		})
 		d.TextStrokeTransparency = 1
 	end

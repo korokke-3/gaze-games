@@ -194,6 +194,17 @@ local function runMatch(match, view, sink, opts, step, onEnd)
 			menu.opts.tipsDone = true
 			Net.event("SaveSettings"):FireServer(menu.opts)
 		end)
+	elseif not menu.opts.tipSpin and device == "keyboard" and opts.mouseAim ~= false then
+		-- 操作ヒントを終えた PC の人へ: スワイプの回転 (PC だけの技) を 1 回だけ案内する
+		local used = input.used
+		hud:setTips({
+			{ text = Locale.t(lang, "tip.spin", hud:_glyph({ "pass" }, device)), done = function()
+				return used.spin == true
+			end },
+		}, function()
+			menu.opts.tipSpin = true
+			Net.event("SaveSettings"):FireServer(menu.opts)
+		end)
 	else
 		hud:setTips(nil)
 	end

@@ -27,6 +27,7 @@ Bindings.ACTIONS = {
 	{ id = "l1", group = "mod" },
 	{ id = "r1", group = "mod" },
 	{ id = "l2", group = "mod" },
+	{ id = "runCall", group = "mod" },
 	{ id = "flickUp", group = "rs" },
 	{ id = "flickDown", group = "rs" },
 	{ id = "flickLeft", group = "rs" },
@@ -47,6 +48,7 @@ Bindings.PAD_ACTIONS = {
 	l1 = true,
 	r1 = true,
 	l2 = true,
+	runCall = true,
 	levelUp = true,
 	levelDown = true,
 	pause = true,
@@ -160,6 +162,7 @@ local PAD_DEFAULT = {
 	l1 = { "ButtonL1" },
 	r1 = { "ButtonR1" },
 	l2 = { "ButtonL2" },
+	runCall = { "ButtonR3" },
 	levelUp = { "DPadUp" },
 	levelDown = { "DPadDown" },
 	pause = { "ButtonStart" },
@@ -181,6 +184,7 @@ Bindings.PRESETS = {
 		l1 = { "Q" },
 		r1 = { "R" },
 		l2 = { "F" },
+		runCall = { "G" },
 		flickUp = { "Up" },
 		flickDown = { "Down" },
 		flickLeft = { "Left" },
@@ -203,6 +207,7 @@ Bindings.PRESETS = {
 		l1 = { "Q" },
 		r1 = { "E" },
 		l2 = { "F" },
+		runCall = { "G" },
 		flickUp = { "Up" },
 		flickDown = { "Down" },
 		flickLeft = { "Left" },
@@ -272,6 +277,27 @@ function Bindings.validate(raw)
 	end
 	out.kb = clean(raw.kb, KB_ALLOWED, Bindings.MAX_KB, nil)
 	out.pad = clean(raw.pad, PAD_ALLOWED, Bindings.MAX_PAD, Bindings.PAD_ACTIONS)
+	-- 後から増えた操作 (保存データに項目が無い) は、空いていれば既定のキーを入れる
+	local function fill(src, dst, defaults)
+		local used = {}
+		for _, list in dst do
+			for _, k in list do
+				used[k] = true
+			end
+		end
+		for id, list in dst do
+			if (type(src) ~= "table" or src[id] == nil) and #list == 0 then
+				for _, k in defaults[id] or {} do
+					if not used[k] then
+						used[k] = true
+						table.insert(list, k)
+					end
+				end
+			end
+		end
+	end
+	fill(raw.kb, out.kb, Bindings.PRESETS[out.preset] or Bindings.PRESETS.mouse)
+	fill(raw.pad, out.pad, PAD_DEFAULT)
 	return out
 end
 

@@ -181,6 +181,7 @@ local SETTING_KEYS = {
 	assist = "number",
 	mouseAim = "boolean",
 	tipsDone = "boolean",
+	tipSpin = "boolean",
 	-- 練習の自己ベスト (報酬は無いので、範囲だけ確かめる)
 	pbPass = "number",
 	pbShoot = "number",

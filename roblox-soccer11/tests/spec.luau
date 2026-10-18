@@ -1642,6 +1642,129 @@ do
 	check("ボールの中心がラインを越えただけではアウトにならない", o.setp == nil)
 end
 
+print("== PC: スワイプの回転・走り込みの指示 ==")
+do
+	-- 空いた地点へのパスを蹴り、止まるまでの軌跡 (直線からの膨らみ・終点)
+	local function passPath(spin, btn)
+		local m = Match.new({ random = lcg(55), assist = 0 })
+		-- 蹴る選手以外はピッチから外す (誰も拾いに来ない)
+		local me = m:seat(1).ctrl
+		for _, q in m.pl do
+			if q ~= me then
+				q.out = true
+				q.p = { x = 0, y = 60 }
+			end
+		end
+		m.act[0], m.act[1] = { me }, {}
+		local s = m:seat(1)
+		-- 浮き球は奥へ転がって外に出ないよう、自陣から蹴る
+		local x0 = btn == "lofted" and -48 or 0
+		local p = giveBall(m, s, { x = x0, y = 0 })
+		p.face = { x = 1, y = 0 }
+		m:setAimPoint(1, x0 + 20, 0)
+		m:press(1, btn or "pass")
+		step(m, 12)
+		if spin then
+			m:spin(1, spin.side, spin.top)
+		end
+		m:release(1, btn or "pass")
+		p.stun = 99 -- 蹴った本人も拾わない
+		local a = { x = m.ball.p.x, y = m.ball.p.y }
+		local maxZ, minY, maxY = 0, 1e9, -1e9
+		local landX, crossY = nil, nil
+		for _ = 1, 150 do
+			step(m, 1)
+			if crossY == nil and m.ball.p.x >= x0 + 20 then
+				crossY = m.ball.p.y
+			end
+			maxZ = math.max(maxZ, m.ball.z)
+			minY = math.min(minY, m.ball.p.y)
+			maxY = math.max(maxY, m.ball.p.y)
+			if landX == nil and maxZ > 0.3 and m.ball.z <= 0.01 then
+				landX = m.ball.p.x
+			end
+			if m.ball.owner ~= nil or (m.ball.v.x ^ 2 + m.ball.v.y ^ 2) < 0.05 then
+				break
+			end
+		end
+		return { endP = { x = m.ball.p.x, y = m.ball.p.y }, maxZ = maxZ, minY = minY, maxY = maxY, landX = landX, start = a, crossY = crossY }
+	end
+	local plain = passPath(nil)
+	local left = passPath({ side = 1, top = 0 })
+	local right = passPath({ side = -1, top = 0 })
+	check("横回転: 右へ膨らんでから左へ曲がる (+ = 狙いの左へ曲がる)", left.minY < -1.0, left.minY)
+	check("横回転: 逆向きは左へ膨らむ", right.maxY > 1.0, right.maxY)
+	check("曲げても狙った地点 (x = 20) の近くを通る", left.crossY ~= nil and math.abs(left.crossY) < 2.0 and math.abs(right.crossY) < 2.0, tostring(left.crossY) .. " / " .. tostring(right.crossY))
+	local chip = passPath({ side = 0, top = -1 })
+	check("逆回転のグラウンダーは浮く (チップ)", chip.maxZ > 0.3 and plain.maxZ < 0.05, chip.maxZ)
+	local loftPlain = passPath(nil, "lofted")
+	local loftBack = passPath({ side = 0, top = -1 }, "lofted")
+	local loftTop = passPath({ side = 0, top = 1 }, "lofted")
+	check("浮き球: 逆回転は高く上がる", loftBack.maxZ > loftPlain.maxZ + 0.5, loftBack.maxZ .. " / " .. loftPlain.maxZ)
+	check("浮き球: 順回転は低い", loftTop.maxZ < loftPlain.maxZ - 0.3, loftTop.maxZ .. " / " .. loftPlain.maxZ)
+	check(
+		"浮き球: 落ちてから転がる距離 (逆回転 < 普通 < 順回転)",
+		(loftBack.endP.x - (loftBack.landX or 0)) < (loftPlain.endP.x - (loftPlain.landX or 0))
+			and (loftPlain.endP.x - (loftPlain.landX or 0)) < (loftTop.endP.x - (loftTop.landX or 0))
+	)
+	-- 古い回転は使わない (0.5 秒以上前)
+	local m = Match.new({ random = lcg(56) })
+	local s = m:seat(1)
+	giveBall(m, s, { x = 0, y = 0 })
+	m:spin(1, 1, 0)
+	m:press(1, "pass")
+	step(m, 30)
+	m:release(1, "pass")
+	check("離す 0.5 秒以上前の回転は掛からない", m.ball.curl == 0)
+	check("不正な回転の値は無視", pcall(function()
+		m:spin(1, 0 / 0, 1)
+		m:spin(1, "x", 1)
+	end) and m:seat(1).spinNext == nil)
+
+	-- 走り込みの指示
+	local r = Match.new({ random = lcg(57) })
+	local rs = r:seat(1)
+	giveBall(r, rs, { x = 0, y = 0 })
+	r:command(1, "run:12.0,-10.0")
+	local runner = nil
+	for _, q in r:active(0) do
+		if q.run ~= nil then
+			runner = q
+		end
+	end
+	check("G: 指した地点へ一番近い味方が走る", runner ~= nil and runner.run.to.x == 12 and runner.run.to.y == -10)
+	step(r, 30)
+	check("走り込む選手が地点へ近づく", runner ~= nil and math.abs(runner.p.x - 12) + math.abs(runner.p.y + 10) < 30)
+	local r2 = Match.new({ random = lcg(58) })
+	giveBall(r2, r2:seat(1), { x = 0, y = 0 })
+	r2:command(1, "run:")
+	local any = false
+	for _, q in r2:active(0) do
+		if q.run ~= nil and q.run.to.x > 10 then
+			any = true
+		end
+	end
+	check("地点なし (パッド): 前線の味方が裏へ", any)
+	check("おかしな指示は無視", pcall(r2.command, r2, 1, "run:abc,1e999"))
+
+	-- 入力の圧縮に回転が載る
+	local packed = Snapshot.packInput({ move = { x = 0, y = 0 }, buttons = {}, spin = { side = -0.5, top = 1 } })
+	local un = Snapshot.unpackInput(packed)
+	check("回転が入力の送信に載る", un.spin ~= nil and math.abs(un.spin.side + 0.5) < 0.02 and math.abs(un.spin.top - 1) < 0.02)
+	local un2 = Snapshot.unpackInput(Snapshot.packInput({ move = { x = 0, y = 0 }, buttons = {} }))
+	check("回転が無ければ送らない", un2.spin == nil)
+
+	-- 古い保存データ (runCall の項目が無い) には G が入る
+	local old = Bindings.fromPreset("mouse")
+	old.kb.runCall = nil
+	old.pad.runCall = nil
+	local v = Bindings.validate(old)
+	check("後から増えた操作に既定のキーが入る", v.kb.runCall[1] == "G" and v.pad.runCall[1] == "ButtonR3")
+	local custom = Bindings.fromPreset("mouse")
+	custom.kb.runCall = {}
+	check("自分で外した操作は空のまま", #Bindings.validate(custom).kb.runCall == 0)
+end
+
 print(("%d checks, %d failures"):format(checks, failures))
 if failures > 0 then
 	error("spec failed")
