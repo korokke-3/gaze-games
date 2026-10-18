@@ -335,6 +335,20 @@ function World.new(match, lang, style)
 	self.starAnchor.Position = Vector3.new(0, -500, 0)
 	local star = billboard(self.starAnchor, UDim2.fromOffset(60, 40), Vector3.new(0, 0, 0))
 	newLabel(star, { Text = "★", TextColor3 = Color3.fromRGB(80, 255, 140) })
+	-- 3 人目の予約 (青い輪と ②)
+	self.relayRing = newPart({
+		Name = "RelayRing",
+		Shape = Enum.PartType.Cylinder,
+		Size = Vector3.new(0.08, 4.6, 4.6),
+		Color = Color3.fromRGB(90, 160, 255),
+		Material = Enum.Material.Neon,
+		Transparency = 0.25,
+	}, self.folder)
+	self.relayRing.Position = Vector3.new(0, -500, 0)
+	self.relayAnchor = newPart({ Name = "RelayMark", Size = Vector3.new(0.2, 0.2, 0.2), Transparency = 1 }, self.folder)
+	self.relayAnchor.Position = Vector3.new(0, -500, 0)
+	local relayMark = billboard(self.relayAnchor, UDim2.fromOffset(60, 40), Vector3.new(0, 0, 0))
+	newLabel(relayMark, { Text = "②", TextColor3 = Color3.fromRGB(120, 180, 255) })
 	-- マウスの照準 (指している地点)
 	self.reticle = newPart({
 		Name = "Reticle",
@@ -541,6 +555,14 @@ function World:step(dt, view)
 		self.targetRing.CFrame = CFrame.new(toWorld(recv.p.x, recv.p.y, 0.1)) * CFrame.Angles(0, 0, math.rad(90))
 	else
 		self.targetRing.Position = self.hidden
+	end
+	local rl = me and me.relayTo
+	if rl ~= nil and not rl.out then
+		self.relayRing.CFrame = CFrame.new(toWorld(rl.p.x, rl.p.y, 0.11)) * CFrame.Angles(0, 0, math.rad(90))
+		self.relayAnchor.Position = toWorld(rl.p.x, rl.p.y, 6.2)
+	else
+		self.relayRing.Position = Vector3.new(0, -500, 0)
+		self.relayAnchor.Position = Vector3.new(0, -500, 0)
 	end
 	local hl = match.practice and match.practice.highlight
 	if hl ~= nil and not hl.out then

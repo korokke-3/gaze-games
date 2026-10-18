@@ -190,6 +190,7 @@ function RemoteMatch:advance(now)
 			kind = s.kind,
 			power = s.power,
 			preview = s.preview > 0 and self.pl[s.preview] or nil,
+			relayTo = (s.relay or 0) > 0 and self.pl[s.relay] or nil,
 		})
 	end
 	local me = self:seat(self.myId)

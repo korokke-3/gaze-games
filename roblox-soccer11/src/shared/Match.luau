@@ -564,6 +564,9 @@ function Match:chargePower(s)
 	if s == nil or s.charge == nil then
 		return nil
 	end
+	if s.charge.locked ~= nil then
+		return s.charge.locked
+	end
 	return clamp((self.elapsed - s.charge.t0) / CTRL.GaugeTime, 0, 1)
 end
 
@@ -625,6 +628,23 @@ function Match:command(id, cmd)
 		if self.mode == "replay" then
 			self:endReplay()
 		end
+	elseif cmd == "pow+" or cmd == "pow-" then
+		-- PC: 溜め中のホイールで強さを固定して微調整 (1 目盛り 5%)
+		local ch = s.charge
+		if ch ~= nil then
+			local cur = self:chargePower(s) or 0
+			ch.locked = clamp(cur + (cmd == "pow+" and 0.05 or -0.05), 0, 1)
+		end
+	elseif cmd == "lineUp" or cmd == "lineDown" or cmd == "pressUp" or cmd == "pressDown" then
+		-- クイック戦術: 守備ラインの高さ / プレスの強さ (1〜3)
+		local tac = self.tactics[s.team]
+		local field = string.sub(cmd, 1, 4) == "line" and "line" or "press"
+		local up = string.sub(cmd, -2) == "Up"
+		tac[field] = clamp(tac[field] + (up and 1 or -1), 1, 3)
+		self:popup("popup." .. field .. tac[field], s.team)
+	elseif string.sub(cmd, 1, 6) == "relay:" then
+		local x, y = string.match(cmd, "^relay:(%-?[%d%.]+),(%-?[%d%.]+)$")
+		self:reserveRelay(s, tonumber(x), tonumber(y))
 	elseif string.sub(cmd, 1, 4) == "run:" then
 		local x, y = string.match(cmd, "^run:(%-?[%d%.]+),(%-?[%d%.]+)$")
 		self:callRun(s, tonumber(x), tonumber(y))
@@ -659,6 +679,35 @@ function Match:callRun(s, x, y)
 	best.run = { to = to, untilT = self.elapsed + 3.5 }
 	self:event("call", best)
 	self:label(best, "label.run")
+end
+
+--- 3 人目の予約 (PC: V で、マウスの指す味方を「次の次」の受け手にする)。
+--- 予約してから味方へパスすると、受けた味方がダイレクトで予約した味方へはたく。同じ味方をもう一度指すと取り消し。
+function Match:reserveRelay(s, x, y)
+	local best = nil
+	if x == nil or y == nil or x ~= x or y ~= y then
+		-- 地点なし (パッド): いまの狙いでパスした時の受け手
+		if s.ctrl ~= nil and self.ball.owner == s.ctrl then
+			best = self:selectTarget(s, "pass", 0.5)
+		end
+	else
+		local pt = { x = x, y = y }
+		local bd = CTRL.PointSnap
+		for _, p in self:active(s.team) do
+			if not p.gk and p ~= s.ctrl then
+				local d = vdist(p.p, pt)
+				if d < bd then
+					best, bd = p, d
+				end
+			end
+		end
+	end
+	if best == nil or best == s.relayTo then
+		s.relayTo = nil
+		return
+	end
+	s.relayTo = best
+	self:label(best, "label.relay")
 end
 
 --- PC のスワイプで付けた回転 (次に離すキックに使う)。side: 横回転 -1〜1 (+ = 狙いの左へ曲がる)、top: + 順回転 / - 逆回転
@@ -805,7 +854,7 @@ function Match:release(id, btn)
 		end
 	end
 	ch.mods.curl = ch.curl
-	local power = clamp((self.elapsed - ch.t0) / CTRL.GaugeTime, 0, 1)
+	local power = ch.locked or clamp((self.elapsed - ch.t0) / CTRL.GaugeTime, 0, 1)
 	local p = s.ctrl
 	if self.setp ~= nil then
 		if self.setp.taker == p then
@@ -1197,6 +1246,14 @@ function Match:doKick(s, btn, power, mods)
 		curl = mods.curl,
 		top = mods.top,
 	})
+	-- 3 人目の予約: 受け手がダイレクトで予約した味方へはたく
+	local relay = s.relayTo
+	if relay ~= nil then
+		if recv ~= nil and recv ~= relay and relay ~= p and not relay.out and relay.team == p.team then
+			recv.relay = { to = relay, untilT = self.elapsed + 4.0 }
+		end
+		s.relayTo = nil
+	end
 	-- 蹴った瞬間に、操作を受け手へ移す (eFootball と同じ)
 	if recv ~= nil and recv.seat == nil then
 		self:assign(s, recv)
@@ -1490,6 +1547,22 @@ function Match:gainBall(p)
 		if best ~= nil then
 			self:assign(best, p)
 		end
+	end
+	-- 3 人目の予約: 受けた瞬間にダイレクトで予約の味方へ
+	local rl = p.relay
+	p.relay = nil
+	if rl ~= nil and self.elapsed <= rl.untilT and not rl.to.out and rl.to.team == p.team and self.mode == "play" then
+		local seat = p.seat
+		if seat ~= nil then
+			seat.queued = nil
+		end
+		self.kickTag = "pass"
+		self:kick("pass", { c = p, target = rl.to })
+		self:label(p, "label.relay.go")
+		if seat ~= nil and rl.to.seat == nil then
+			self:assign(seat, rl.to)
+		end
+		return
 	end
 	-- ダイレクトの予約があれば蹴る
 	local s = p.seat

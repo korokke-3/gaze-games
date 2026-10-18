@@ -123,7 +123,7 @@ function Snapshot.encode(match, since)
 		local kind = s.charge and KICKS[s.charge.btn] or 0
 		local power = match:chargePower(s) or 0
 		local prev = indexOf(match, match:previewReceiver(s))
-		table.insert(parts, string.pack("<dBBBB", s.id, indexOf(match, s.ctrl), kind, q(power, 255, 0, 255), prev))
+		table.insert(parts, string.pack("<dBBBBB", s.id, indexOf(match, s.ctrl), kind, q(power, 255, 0, 255), prev, indexOf(match, s.relayTo)))
 	end
 	-- 新しいポップアップ / 技名 / 効果音
 	local pops, labels = {}, {}
@@ -212,8 +212,8 @@ function Snapshot.decode(str)
 	s.seats = {}
 	local ns = read("<B")
 	for _ = 1, ns do
-		local id, ctrl, kind, power, prev = read("<dBBBB")
-		table.insert(s.seats, { id = id, ctrl = ctrl, kind = KICK_NAMES[kind], power = power / 255, preview = prev })
+		local id, ctrl, kind, power, prev, relay = read("<dBBBBB")
+		table.insert(s.seats, { id = id, ctrl = ctrl, kind = KICK_NAMES[kind], power = power / 255, preview = prev, relay = relay })
 	end
 	s.popups = {}
 	for _ = 1, read("<B") do

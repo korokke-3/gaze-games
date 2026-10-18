@@ -842,13 +842,17 @@ function Menu:_pcHelp(b)
 	end
 	self:_header(t("pchelp.title"))
 	local run = Bindings.display(b.kb.runCall and b.kb.runCall[1])
+	local relay = Bindings.display(b.kb.relay and b.kb.relay[1])
 	for _, row in {
 		{ t("pchelp.side.k"), t("pchelp.side") },
 		{ t("pchelp.top.k"), t("pchelp.top") },
 		{ t("pchelp.back.k"), t("pchelp.back") },
+		{ t("pchelp.wheel.k"), t("pchelp.wheel") },
 		{ run, t("pchelp.run") },
+		{ relay, t("pchelp.relay") },
+		{ t("pchelp.tactics.k"), t("pchelp.tactics") },
 	} do
-		local r = self:_row(40)
+		local r = self:_row(48)
 		label(r, row[1], {
 			Position = UDim2.fromOffset(12, 0),
 			Size = UDim2.new(0.34, -12, 1, 0),

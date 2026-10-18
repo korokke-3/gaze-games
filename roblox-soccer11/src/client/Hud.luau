@@ -37,7 +37,9 @@ local GUIDE = {
 		{ { "l1", "+", "pass" }, "guide.l1" },
 		{ { "r1", "+", "shoot" }, "guide.r1" },
 		{ "swipe", "guide.swipe" },
+		{ "wheelpow", "guide.wheelpow" },
 		{ { "runCall" }, "guide.runcall" },
+		{ { "relay" }, "guide.relay" },
 		{ "flick", "guide.feint" },
 		{ "zoom", "guide.zoom" },
 	},
@@ -51,6 +53,8 @@ local GUIDE = {
 		{ "flick", "guide.switchdir" },
 		{ { "through" }, "guide.gk" },
 		{ { "levelDown", "/", "levelUp" }, "guide.level" },
+		{ { "lineDown", "/", "lineUp" }, "guide.line" },
+		{ { "pressDown", "/", "pressUp" }, "guide.press" },
 	},
 	setpiece = {
 		{ "aim", "guide.sp.aim" },
@@ -477,7 +481,7 @@ function Hud:_glyph(spec, device)
 		return dev == "pad" and "RS" or (first("moveUp") .. first("moveLeft") .. first("moveDown") .. first("moveRight") .. " ×2")
 	elseif spec == "flickLR" then
 		return dev == "pad" and "RS" or (first("moveLeft") .. " / " .. first("moveRight"))
-	elseif spec == "zoom" then
+	elseif spec == "zoom" or spec == "wheelpow" then
 		return dev == "pad" and "—" or "Wheel"
 	elseif spec == "swipe" then
 		-- PC: 離す瞬間にマウスを払う / パッド: 溜め中に右スティック

@@ -1765,6 +1765,91 @@ do
 	check("自分で外した操作は空のまま", #Bindings.validate(custom).kb.runCall == 0)
 end
 
+print("== PC: ホイールの強さ・3 人目の予約・クイック戦術 ==")
+do
+	-- ホイールで強さを固定して微調整
+	local m = Match.new({ random = lcg(61) })
+	local s = m:seat(1)
+	giveBall(m, s, { x = 0, y = 0 })
+	m:press(1, "pass")
+	step(m, 9) -- 約 0.3
+	local before = m:chargePower(s)
+	m:command(1, "pow+")
+	m:command(1, "pow+")
+	local locked = m:chargePower(s)
+	step(m, 20)
+	check("ホイールで強さが 5% ずつ上がる", math.abs(locked - (before + 0.10)) < 1e-6, locked)
+	check("固定した強さは時間で増えない", m:chargePower(s) == locked)
+	m:command(1, "pow-")
+	check("ホイールを戻すと下がる", math.abs(m:chargePower(s) - (locked - 0.05)) < 1e-6)
+	check("溜めていない時は何も起きない", pcall(function()
+		local m2 = Match.new({ random = lcg(62) })
+		m2:command(1, "pow+")
+	end))
+
+	-- クイック戦術
+	local q = Match.new({ random = lcg(63) })
+	q:command(1, "lineUp")
+	q:command(1, "pressDown")
+	check("クイック戦術: ラインを上げ、プレスを弱める", q.tactics[0].line == 3 and q.tactics[0].press == 1)
+	q:command(1, "lineUp")
+	check("戦術は 1〜3 の範囲", q.tactics[0].line == 3)
+	check("相手チームの戦術は変わらない", q.tactics[1].line == 2 and q.tactics[1].press == 2)
+
+	-- 3 人目の予約: A へパス → A が受けた瞬間に B へダイレクト
+	local r = Match.new({ random = lcg(64), assist = 2 })
+	clearOpponents(r)
+	local rs = r:seat(1)
+	local me = giveBall(r, rs, { x = 0, y = 0 })
+	local A, B = r.teams[0][8], r.teams[0][9]
+	for _, p in r:active(0) do
+		if p ~= me and p ~= A and p ~= B and not p.gk then
+			p.p = { x = -30, y = 30 }
+		end
+	end
+	A.p = { x = 10, y = 0 }
+	B.p = { x = 20, y = 12 }
+	r:command(1, "relay:20.0,12.0")
+	check("V: 指した味方が予約される", rs.relayTo == B)
+	r:command(1, "relay:20.0,12.0")
+	check("同じ味方をもう一度指すと取り消し", rs.relayTo == nil)
+	r:command(1, "relay:20.0,12.0")
+	r:setAimPoint(1, 10, 0)
+	hold(r, 1, "pass", 0.2)
+	check("パスの受け手に予約が渡る", A.relay ~= nil and A.relay.to == B and rs.relayTo == nil)
+	local laid, got = false, false
+	for _ = 1, 150 do
+		step(r, 1)
+		if r.ball.kicker == A and r.ball.target == B then
+			laid = true
+		end
+		if r.ball.owner == B then
+			got = true
+			break
+		end
+	end
+	check("受けた味方がダイレクトで予約の味方へはたく", laid)
+	check("予約の味方がボールを受ける", got, r.ball.owner and r.ball.owner.role)
+	check("操作は予約の味方へ移る", rs.ctrl == B)
+
+	-- 同期: 予約が Snapshot に載る
+	local r2 = Match.new({ random = lcg(65) })
+	local s2 = r2:seat(1)
+	giveBall(r2, s2, { x = 0, y = 0 })
+	local tgt = r2.teams[0][9]
+	r2:command(1, string.format("relay:%.1f,%.1f", tgt.p.x, tgt.p.y))
+	local snap = Snapshot.decode((Snapshot.encode(r2, 0)))
+	check("予約が同期の形式に載る", snap.seats[1].relay > 0 and r2.pl[snap.seats[1].relay] == s2.relayTo)
+
+	-- 古い保存データに新しい操作のキーが入る
+	local old = Bindings.fromPreset("mouse")
+	for _, k in { "relay", "lineDown", "lineUp", "pressDown", "pressUp" } do
+		old.kb[k] = nil
+	end
+	local v = Bindings.validate(old)
+	check("新しい操作の既定キー (V, 1〜4)", v.kb.relay[1] == "V" and v.kb.lineDown[1] == "One" and v.kb.pressUp[1] == "Four")
+end
+
 print(("%d checks, %d failures"):format(checks, failures))
 if failures > 0 then
 	error("spec failed")

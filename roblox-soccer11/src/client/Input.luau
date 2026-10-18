@@ -307,7 +307,20 @@ function Input:_changed(input, processed)
 		self.lastMouseMove = self.clock
 		self:_setDevice("keyboard")
 	elseif t == Enum.UserInputType.MouseWheel then
-		if not processed and self.opts.onZoom then
+		if processed then
+			return
+		end
+		-- キックを溜めている間のホイール = 強さの微調整 (それ以外はズーム)
+		local charging = false
+		for b in KICK_BUTTONS do
+			if self.buttons[b] then
+				charging = true
+			end
+		end
+		if charging then
+			self.sink:command(input.Position.Z > 0 and "pow+" or "pow-")
+			self.used.wheelPower = true
+		elseif self.opts.onZoom then
 			self.opts.onZoom(input.Position.Z)
 		end
 	elseif t == Enum.UserInputType.Gamepad1 then
@@ -424,6 +437,17 @@ function Input:_action(action, down)
 		end
 	elseif action == "levelUp" or action == "levelDown" then
 		self.sink:command(action)
+	elseif action == "lineUp" or action == "lineDown" or action == "pressUp" or action == "pressDown" then
+		self.sink:command(action)
+	elseif action == "relay" then
+		-- 3 人目の予約: マウスの指す味方 (もう一度で取り消し)
+		local pt = self.point
+		if pt ~= nil then
+			self.sink:command(string.format("relay:%.1f,%.1f", pt.x, pt.y))
+		else
+			self.sink:command("relay:")
+		end
+		self.used.relay = true
 	elseif action == "runCall" then
 		-- 走り込みの指示: マウスの指す地点へ (パッドは前線の味方が裏へ)
 		local pt = self.point
