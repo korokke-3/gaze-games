@@ -674,6 +674,8 @@ function Hud:step(match, view)
 	end
 	if pr ~= nil then
 		ptext = t(self.lang, "practice.hint." .. pr.kind)
+	elseif match.myLockRole ~= nil then
+		ptext ..= "   " .. t(self.lang, "hud.locked", match.myLockRole)
 	end
 	self.periodText.Text = ptext
 	self.replayText.Visible = match.mode == "replay"

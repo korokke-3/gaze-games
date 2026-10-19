@@ -35,6 +35,14 @@ function RemoteMatch.new(info, myId)
 		self.teamOf[s.id] = s.team
 	end
 	self.myTeam = self.teamOf[myId] or 0
+	-- ポジション固定 (大人数) なら、自分の担当の役割名
+	for _, s in info.seats do
+		if s.id == myId and s.lock ~= nil then
+			local f = (self.myTeam == 0 and info.formation.home or info.formation.away)
+			local form = Config.Formations[f] or Config.Formation
+			self.myLockRole = form[s.lock + 1] and form[s.lock + 1].role
+		end
+	end
 	local forms = {
 		[0] = Config.Formations[info.formation.home] or Config.Formation,
 		[1] = Config.Formations[info.formation.away] or Config.Formation,

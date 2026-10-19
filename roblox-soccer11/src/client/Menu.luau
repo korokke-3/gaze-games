@@ -546,15 +546,60 @@ function Menu:_renderOnline()
 			LayoutOrder = nextOrder(),
 			ZIndex = 32,
 		})
+		-- ポジション (1 チーム lockFrom 人以上で固定)。位置 index → 役割名
+		local form = Config.Formations[room.formation or "433"] or Config.Formation
+		local function posText(idx)
+			if idx == nil or idx < 0 then
+				return t("online.pos.auto")
+			end
+			return form[idx + 1] and form[idx + 1].role or "?"
+		end
+		label(self.scroll, t("online.pos.note", room.lockFrom or 4), {
+			Size = UDim2.new(1, 0, 0, 20),
+			TextSize = 13,
+			TextWrapped = true,
+			TextColor3 = Color3.fromRGB(180, 200, 190),
+			LayoutOrder = nextOrder(),
+			ZIndex = 32,
+		})
 		for _, m in room.members do
 			local row = self:_row(40)
 			local teamText = room.mode == "coop" and "" or ("[" .. t(m.team == 0 and "online.team.home" or "online.team.away") .. "] ")
 			label(row, teamText .. m.name .. (m.host and (" " .. t("online.host")) or ""), {
 				Position = UDim2.fromOffset(12, 0),
-				Size = UDim2.new(1, -24, 1, 0),
+				Size = UDim2.new(1, -170, 1, 0),
 				TextColor3 = m.team == 0 and Color3.fromRGB(140, 190, 255) or Color3.fromRGB(255, 150, 150),
 				ZIndex = 33,
 			})
+			if m.userId == self.myId and room.state == "lobby" then
+				-- 自分: 押すたびに おまかせ → GK → DF … と希望ポジションを変える
+				local pb = button(row, t("online.pos", posText(m.pos)), GREY, {
+					AnchorPoint = Vector2.new(1, 0.5),
+					Position = UDim2.new(1, -6, 0.5, 0),
+					Size = UDim2.fromOffset(150, 30),
+					TextSize = 14,
+					ZIndex = 33,
+				})
+				pb.Activated:Connect(function()
+					local nxt = (m.pos or -1) + 1
+					if nxt > 10 then
+						nxt = -1
+					end
+					if self.cb.onRoomPos then
+						self.cb.onRoomPos(nxt)
+					end
+				end)
+			else
+				label(row, posText(m.pos), {
+					AnchorPoint = Vector2.new(1, 0),
+					Position = UDim2.new(1, -12, 0, 0),
+					Size = UDim2.fromOffset(140, 40),
+					TextSize = 14,
+					TextXAlignment = Enum.TextXAlignment.Right,
+					TextColor3 = Color3.fromRGB(200, 220, 210),
+					ZIndex = 33,
+				})
+			end
 		end
 		local isHost = false
 		for _, m in room.members do
@@ -607,7 +652,7 @@ function Menu:_renderOnline()
 		return
 	end
 	label(self.scroll, t("online.note"), {
-		Size = UDim2.new(1, 0, 0, 36),
+		Size = UDim2.new(1, 0, 0, 52),
 		TextSize = 14,
 		TextWrapped = true,
 		TextColor3 = Color3.fromRGB(180, 200, 190),

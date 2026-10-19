@@ -85,6 +85,11 @@ Net.event("RoomTeam").OnServerEvent:Connect(function(player, team)
 		Rooms.setTeam(player, team)
 	end
 end)
+Net.event("RoomPos").OnServerEvent:Connect(function(player, index)
+	if not throttled(player, "roompos", 0.2) then
+		Rooms.setPos(player, index)
+	end
+end)
 Net.event("RoomOpts").OnServerEvent:Connect(function(player, opts)
 	if not throttled(player, "roomopts", 0.3) then
 		Rooms.setOpts(player, opts)

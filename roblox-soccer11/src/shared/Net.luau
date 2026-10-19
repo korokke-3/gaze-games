@@ -21,6 +21,7 @@ local EVENTS = {
 	"RoomJoin", -- (id: number)
 	"RoomLeave", -- ()
 	"RoomTeam", -- (team: 0 | 1)
+	"RoomPos", -- (index: 0..10 | -1 = おまかせ) 大人数のときのポジション
 	"RoomOpts", -- (opts: table)  ホストだけ
 	"RoomStart", -- ()  ホストだけ
 	"MatchInput", -- (packet: string)  Snapshot.packInput

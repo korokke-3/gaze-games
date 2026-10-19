@@ -1,6 +1,7 @@
 --!nonstrict
 --[[
-	Rooms — オンラインの協力 (Co-op: 最大 3 人 vs CPU) と対戦 (Versus: 1 チーム最大 3 人ずつ)。
+	Rooms — オンラインの協力 (Co-op: 最大 11 人 vs CPU) と対戦 (Versus: 最大 11 対 11)。
+	1 チーム 4 人以上のときは、各自が選んだポジションの選手だけを操作する (ポジション固定)。
 
 	試合はサーバーで動かす (Match は Roblox API 非依存なので、そのまま使える)。
 	クライアントは入力を送り、サーバーは 15 回 / 秒で Snapshot を送る。
@@ -54,7 +55,7 @@ end
 local function summary(room)
 	local list = {}
 	for _, m in members(room) do
-		table.insert(list, { name = m.name, team = m.team, userId = m.userId, host = m.userId == room.hostId })
+		table.insert(list, { name = m.name, team = m.team, userId = m.userId, host = m.userId == room.hostId, pos = m.pos or -1 })
 	end
 	return {
 		id = room.id,
@@ -67,7 +68,39 @@ local function summary(room)
 		length = room.opts.length,
 		difficulty = room.opts.difficulty,
 		cup = room.opts.cup,
+		formation = room.opts.formation,
+		lockFrom = ONLINE.LockFrom,
 	}
+end
+
+--- ポジションを決める: 選んだ位置を優先 (同じ位置なら先に入った人)、残りは PositionOrder の順に空きへ。
+--- 戻り値: member -> 位置 index
+function Rooms.resolvePositions(room, team)
+	local list = {}
+	for _, m in members(room) do
+		if m.team == team then
+			table.insert(list, m)
+		end
+	end
+	local taken, out = {}, {}
+	for _, m in list do
+		if m.pos ~= nil and m.pos >= 0 and not taken[m.pos] then
+			taken[m.pos] = true
+			out[m] = m.pos
+		end
+	end
+	for _, m in list do
+		if out[m] == nil then
+			for _, idx in ONLINE.PositionOrder do
+				if not taken[idx] then
+					taken[idx] = true
+					out[m] = idx
+					break
+				end
+			end
+		end
+	end
+	return out
 end
 
 function Rooms.list()
@@ -94,6 +127,20 @@ local function pushRoom(room)
 		Net.event("RoomState"):FireClient(m.player, s)
 	end
 	broadcastList()
+end
+
+--- 希望のポジション (-1 = おまかせ)。
+function Rooms.setPos(player, index)
+	local room = byPlayer[player]
+	if room == nil or room.state ~= "lobby" or typeof(index) ~= "number" or index ~= index then
+		return
+	end
+	index = math.floor(index)
+	if index < -1 or index > 10 then
+		return
+	end
+	room.members[player].pos = index >= 0 and index or nil
+	pushRoom(room)
 end
 
 local function sanitizeOpts(raw)
@@ -230,9 +277,17 @@ function Rooms.start(player)
 		return
 	end
 	local seats, roster = {}, {}
+	local lockOf = {}
+	for team = 0, 1 do
+		if teamCount(room, team) >= ONLINE.LockFrom then
+			for m, idx in Rooms.resolvePositions(room, team) do
+				lockOf[m] = idx
+			end
+		end
+	end
 	for _, m in members(room) do
-		table.insert(seats, { id = m.userId, team = m.team })
-		table.insert(roster, { id = m.userId, team = m.team, name = m.name })
+		table.insert(seats, { id = m.userId, team = m.team, lock = lockOf[m] })
+		table.insert(roster, { id = m.userId, team = m.team, name = m.name, lock = lockOf[m] })
 		m.prevButtons = {}
 	end
 	local rng = Random.new()

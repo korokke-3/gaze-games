@@ -507,6 +507,9 @@ menu = Menu.new(menuGui, lang, {
 	onRoomTeam = function(team)
 		Net.event("RoomTeam"):FireServer(team)
 	end,
+	onRoomPos = function(index)
+		Net.event("RoomPos"):FireServer(index)
+	end,
 	onRoomOpts = function(opts)
 		Net.event("RoomOpts"):FireServer({
 			length = opts.length,

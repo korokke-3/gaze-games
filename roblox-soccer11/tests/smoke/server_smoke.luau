@@ -210,12 +210,47 @@ Check("3 人まで参加できる", rsb and rsb.args[1].count == 3)
 local d = newPlayer(44)
 join(d)
 NetFire("RoomJoin", d, roomId)
-Check("協力は 4 人目を断る", lastOf(d, "RoomState") == nil)
+Check("4 人目も参加できる (最大 11 人)", lastOf(d, "RoomState") ~= nil and lastOf(d, "RoomState").args[1].count == 4)
+-- 11 人まで埋めて、12 人目は断る (確かめたら 4 人に戻す)
+local extras = {}
+for i = 1, 7 do
+	local e = newPlayer(60 + i)
+	join(e)
+	NetFire("RoomJoin", e, roomId)
+	table.insert(extras, e)
+end
+Check("協力は 11 人まで", lastOf(a, "RoomState").args[1].count == 11)
+local over = newPlayer(80)
+join(over)
+NetFire("RoomJoin", over, roomId)
+Check("協力は 12 人目を断る", lastOf(over, "RoomState") == nil)
+for _, e in extras do
+	NetFire("RoomLeave", e)
+end
+-- 4 人以上: ポジション固定。d は GK を希望する
+NetFire("RoomPos", d, 0)
+Check("希望のポジションが部屋に出る", (function()
+	for _, m in lastOf(a, "RoomState").args[1].members do
+		if m.userId == d.UserId then
+			return m.pos == 0
+		end
+	end
+	return false
+end)())
+NetFire("RoomPos", d, 99)
+NetFire("RoomPos", d, 0 / 0)
 NetFire("RoomStart", b)
 Check("ホスト以外は開始できない", lastOf(a, "OnlineStart") == nil)
 NetFire("RoomStart", a)
 local st = lastOf(b, "OnlineStart")
-Check("ホストが開始すると全員に開始が届く", st ~= nil and lastOf(c3, "OnlineStart") ~= nil and #st.args[1].seats == 3)
+Check("ホストが開始すると全員に開始が届く", st ~= nil and lastOf(c3, "OnlineStart") ~= nil and #st.args[1].seats == 4)
+Check("4 人ならポジション固定 (希望の GK と、残りは FW から順に)", st ~= nil and (function()
+	local locks = {}
+	for _, x in st.args[1].seats do
+		locks[x.id] = x.lock
+	end
+	return locks[d.UserId] == 0 and locks[a.UserId] == 9 and locks[b.UserId] == 8 and locks[c3.UserId] == 10
+end)())
 Check("協力は全員ホームチーム", st and st.args[1].seats[1].team == 0 and st.args[1].seats[3].team == 0)
 -- 試合を進めながら入力を送る
 local snaps0 = countOf(a, "OnlineSnap")
@@ -238,7 +273,15 @@ Check("Snapshot が送られる (15 回/秒前後)", countOf(a, "OnlineSnap") - 
 local snapRaw = lastOf(a, "OnlineSnap").args[1]
 Check("Snapshot は buffer で送る", type(snapRaw) == "buffer")
 local snap = Snapshot.decode(buffer.tostring(snapRaw))
-Check("Snapshot に 3 人の操作者", #snap.seats == 3)
+Check("Snapshot に 4 人の操作者", #snap.seats == 4)
+Check("固定したポジションの選手を操作している", (function()
+	for _, x in snap.seats do
+		if x.id == d.UserId then
+			return snap.pl[x.ctrl] ~= nil and snap.pl[x.ctrl].gk
+		end
+	end
+	return false
+end)())
 NetFire("MatchInput", a, "garbage")
 NetFire("MatchInput", a, buffer.create(500))
 NetFire("MatchInput", a, 12345)
@@ -263,6 +306,7 @@ Check("試合後は部屋の待機に戻る", rsAfter and rsAfter.args[1].state 
 -- 対戦
 NetFire("RoomLeave", b)
 NetFire("RoomLeave", c3)
+NetFire("RoomLeave", d)
 NetFire("RoomCreate", b, "versus", { length = 180 })
 local vs = lastOf(b, "RoomState").args[1]
 NetFire("RoomStart", b)

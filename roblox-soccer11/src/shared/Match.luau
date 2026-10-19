@@ -296,7 +296,7 @@ function Match.new(opts)
 		end
 	end
 	for _, s in seats do
-		self:addSeat(s.id, s.team)
+		self:addSeat(s.id, s.team, s.lock)
 	end
 
 	self.ball = {
@@ -459,14 +459,23 @@ function Match:event(kind, player, tag)
 end
 
 -- ================================================================ 操作者 (シート)
-function Match:addSeat(id, team)
+--- lock: フォーメーションの位置 index (0 = GK)。指定すると、その選手だけを操作する (大人数のポジション固定)
+function Match:addSeat(id, team, lock)
 	local s = newSeat(id, team)
 	table.insert(self.seats, s)
 	self.seatById[id] = s
+	if type(lock) == "number" and lock >= 0 and lock <= 10 then
+		s.locked = self.teams[team][math.floor(lock) + 1]
+	end
 	if self.ball ~= nil then
-		self:assign(s, self:freeNearest(team, self.ball.p, nil))
+		self:assign(s, s.locked or self:freeNearest(team, self.ball.p, nil))
 	end
 	return s
+end
+
+--- ポジション固定の操作者か (固定した選手が退場していなければ)。
+function Match:isLocked(s)
+	return s.locked ~= nil and not s.locked.out
 end
 
 --- 操作者が抜けた (切断など)。その選手は AI に戻る。
@@ -501,6 +510,9 @@ end
 function Match:assign(s, p)
 	if p == nil or (p.seat ~= nil and p.seat ~= s) then
 		return
+	end
+	if self:isLocked(s) and p ~= s.locked then
+		return -- ポジション固定: 自分の選手以外には切り替わらない
 	end
 	if s.ctrl ~= nil and s.ctrl ~= p then
 		s.ctrl.seat = nil
@@ -1692,6 +1704,12 @@ end
 
 --- 操作者ごとの自動切り替え (守備で、より良い位置の選手へ。頻繁には変えない)。
 function Match:autoSwitch(s)
+	if self:isLocked(s) then
+		if s.ctrl ~= s.locked and s.locked.seat == nil then
+			self:assign(s, s.locked)
+		end
+		return
+	end
 	local b = self.ball
 	local p = s.ctrl
 	if p == nil or p.out then
@@ -3190,6 +3208,7 @@ function Match:sendOff(p)
 	if s ~= nil then
 		p.seat = nil
 		s.ctrl = nil
+		s.locked = nil -- 退場したら、ポジション固定を外して近い選手を操作する
 		self:assign(s, self:freeNearest(p.team, self.ball.p, nil))
 	end
 end
@@ -3377,12 +3396,14 @@ function Match:kickoff(team)
 		for _, s in self.seats do
 			if s.team == t then
 				s.ctrl = nil
-				if first and t == team then
+				if self:isLocked(s) then
+					self:assign(s, s.locked)
+				elseif first and t == team then
 					self:assign(s, st)
+					first = false
 				else
 					self:assign(s, self:freeNearest(t, b.p, st))
 				end
-				first = false
 			end
 		end
 	end

@@ -1850,6 +1850,62 @@ do
 	check("新しい操作の既定キー (V, 1〜4)", v.kb.relay[1] == "V" and v.kb.lineDown[1] == "One" and v.kb.pressUp[1] == "Four")
 end
 
+print("== 11 対 11 (ポジション固定) ==")
+do
+	local seats = {}
+	for t = 0, 1 do
+		for i = 0, 10 do
+			table.insert(seats, { id = 100 + t * 20 + i, team = t, lock = i })
+		end
+	end
+	local m = Match.new({ random = lcg(71), seats = seats, length = 120 })
+	local function allLocked()
+		for _, s in m.seats do
+			if not s.locked.out and s.ctrl ~= s.locked then
+				return false, s.id
+			end
+		end
+		return true
+	end
+	check("22 人とも自分のポジションの選手を持つ", allLocked())
+	check("GK も人が操作できる", m:seat(100).ctrl.gk == true)
+	-- ボールを持った人がパスしても、操作は受け手へ移らない
+	local s = m:seat(109) -- HOME の ST
+	local st = s.ctrl
+	m:gainBall(st)
+	local mate = m.teams[0][9]
+	mate.p = { x = st.p.x + 8, y = st.p.y }
+	m:setAimPoint(109, mate.p.x, mate.p.y)
+	hold(m, 109, "pass", 0.2)
+	check("パスしても自分の選手のまま", s.ctrl == st)
+	m:press(109, "l1")
+	m:release(109, "l1")
+	check("L1 でも切り替わらない", s.ctrl == st)
+	-- 放置で試合を最後まで (誰も操作しないと AI が動かす)
+	local okRun = true
+	local worst = 0
+	local n = 0
+	while not m.ended and n < 20000 do
+		m:update(1 / 30)
+		n += 1
+		if n % 300 == 0 then
+			local ok = allLocked()
+			okRun = okRun and ok
+			worst = math.max(worst, #(Snapshot.encode(m, 0)))
+		end
+	end
+	check("11 対 11 の試合が最後まで進む", m.ended, n)
+	check("試合中ずっと各自の選手のまま (キックオフ・後半も)", okRun)
+	check("同期 1 回の大きさが 1.2KB 以内", worst > 0 and worst < 1200, worst)
+	-- 退場したらポジション固定を外す
+	local m2 = Match.new({ random = lcg(72), seats = { { id = 1, team = 0, lock = 5 }, { id = 2, team = 0, lock = 6 }, { id = 3, team = 0, lock = 7 }, { id = 4, team = 0, lock = 8 } } })
+	local s2 = m2:seat(1)
+	local mine = s2.locked
+	m2:sendOff(mine)
+	step(m2, 3)
+	check("退場したら別の選手を操作する", s2.ctrl ~= nil and s2.ctrl ~= mine and not s2.ctrl.out)
+end
+
 print(("%d checks, %d failures"):format(checks, failures))
 if failures > 0 then
 	error("spec failed")

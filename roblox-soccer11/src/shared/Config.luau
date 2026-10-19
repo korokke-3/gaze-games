@@ -198,7 +198,10 @@ Config.Online = {
 	SnapshotRate = 15, -- クライアントへの送信 [回/秒]
 	InputRate = 20, -- クライアントからの入力の送信 [回/秒] (ボタンの変化は即時)
 	InterpDelay = 0.1, -- クライアントの補間の遅れ [s]
-	MaxPerTeam = 3, -- 1 チームの人数 (eFootball の協力と同じ 3 人まで)
+	MaxPerTeam = 11, -- 1 チームの人数 (11 対 11 まで)
+	LockFrom = 4, -- 1 チームにこの人数以上いたら、各自のポジション (選手) を固定する
+	-- ポジションを選ばなかった人に割り当てる順 (フォーメーションの位置 index: FW → MF → DF → GK)
+	PositionOrder = { 9, 8, 10, 6, 7, 5, 1, 4, 2, 3, 0 },
 	MaxRooms = 20,
 	MaxInputsPerSecond = 80,
 }
