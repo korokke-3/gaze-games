@@ -15,6 +15,8 @@ local Store = require(script.Services.Store)
 local Matches = require(script.Services.Matches)
 local Monetization = require(script.Services.Monetization)
 local Rooms = require(script.Services.Rooms)
+local Matchmaking = require(script.Services.Matchmaking)
+local Leaderboard = require(script.Services.Leaderboard)
 
 Data.start()
 Monetization.start()
@@ -36,6 +38,7 @@ local function throttled(player: Player, name: string, interval: number): boolea
 end
 
 local function onJoin(player: Player)
+	Matchmaking.onJoin(player) -- 招待・クイックマッチで来た人の用事 (処理は RequestState の後)
 	Data.load(player)
 	Store.refreshPasses(player)
 	Store.push(player)
@@ -48,6 +51,7 @@ end
 
 Players.PlayerRemoving:Connect(function(player)
 	Rooms.remove(player)
+	Matchmaking.remove(player)
 	Matches.remove(player)
 	Store.remove(player)
 	lastCall[player] = nil
@@ -58,6 +62,30 @@ Net.event("RequestState").OnServerEvent:Connect(function(player)
 	if not throttled(player, "state", 0.5) then
 		Store.push(player)
 		Net.event("Rooms"):FireClient(player, Rooms.list())
+		Matchmaking.ready(player)
+	end
+end)
+
+-- ================================================================ クイックマッチ・ランキング
+Net.event("QuickMatch").OnServerEvent:Connect(function(player, on)
+	if not throttled(player, "quick", 1) then
+		if on == true then
+			Matchmaking.join(player)
+		else
+			Matchmaking.cancel(player)
+		end
+	end
+end)
+Net.event("PracticeRecord").OnServerEvent:Connect(function(player, kind, value)
+	if typeof(kind) == "string" and Leaderboard.validate(kind, value) ~= nil and not throttled(player, "record:" .. kind, 2) then
+		Leaderboard.submit(player, kind, value)
+	end
+end)
+Net.event("LeaderboardGet").OnServerEvent:Connect(function(player, kind)
+	if typeof(kind) == "string" and not throttled(player, "board", 1) then
+		task.spawn(function()
+			Net.event("Leaderboard"):FireClient(player, kind, Leaderboard.top(kind))
+		end)
 	end
 end)
 
@@ -105,6 +133,7 @@ Net.event("MatchInput").OnServerEvent:Connect(function(player, packet)
 end)
 RunService.Heartbeat:Connect(function(dt)
 	Rooms.tick(dt)
+	Matchmaking.tick(dt)
 end)
 Net.event("MatchStarted").OnServerEvent:Connect(function(player, cfg)
 	if not throttled(player, "start", 1) then

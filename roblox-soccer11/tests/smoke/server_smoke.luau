@@ -350,6 +350,98 @@ Check("退出で部屋が消える", (function()
 	return true
 end)())
 
+-- ================================================================ 練習のランキング
+local r1, r2 = newPlayer(201), newPlayer(202)
+join(r1)
+join(r2)
+NetFire("PracticeRecord", r1, "pass", 14.25)
+NetFire("PracticeRecord", r2, "pass", 11.0)
+NetFire("PracticeRecord", r1, "pass", 20.0) -- 前より遅い: 更新しない
+NetFire("PracticeRecord", r2, "pass", 0.5) -- 速すぎる: 捨てる
+NetFire("PracticeRecord", r1, "shoot", 11) -- 総数より多い: 捨てる
+NetFire("PracticeRecord", r1, "shoot", 7)
+NetFire("PracticeRecord", r1, "nope", 3)
+NetFire("PracticeRecord", r1, "pass", 0 / 0)
+NetFire("LeaderboardGet", r1, "pass")
+local lb = lastOf(r1, "Leaderboard")
+Check("ランキングが届く (タイムは速い順)", lb ~= nil and lb.args[1] == "pass" and #lb.args[2] == 2 and lb.args[2][1].name == "P202" and lb.args[2][1].value == 11 and lb.args[2][2].value == 14.3, lb and #lb.args[2])
+NetFire("LeaderboardGet", r1, "shoot")
+local lb2 = lastOf(r1, "Leaderboard")
+Check("回数の記録は総数以内だけ", lb2 ~= nil and #lb2.args[2] == 1 and lb2.args[2][1].value == 7)
+
+-- ================================================================ クイックマッチ (同じサーバーの 2 人でも、キューを通して組む)
+local q1, q2 = newPlayer(301), newPlayer(302)
+join(q1)
+join(q2)
+NetFire("QuickMatch", q1, true)
+NetFire("QuickMatch", q2, true)
+Check("探し始めると searching", lastOf(q1, "QuickMatchState") ~= nil and lastOf(q1, "QuickMatchState").args[1] == "searching")
+for _ = 1, 200 do
+	FakeClock += 1 / 60
+	Fire("Heartbeat", 1 / 60)
+end
+local function teleOf(p)
+	for _, t in Teleports do
+		if t.player == p then
+			return t
+		end
+	end
+	return nil
+end
+local t1, t2 = teleOf(q1), teleOf(q2)
+Check("2 人とも同じ予約サーバーへ送られる", t1 ~= nil and t2 ~= nil and t1.code == t2.code and t1.data.quick ~= nil)
+Check("見つかったら found", lastOf(q2, "QuickMatchState").args[1] == "found")
+Check("他のサーバーにも知らせる", #Published >= 1)
+-- 1 人だけ待つと timeout
+local q3 = newPlayer(303)
+join(q3)
+NetFire("QuickMatch", q3, true)
+for _ = 1, 60 do
+	FakeClock += 1
+	Fire("Heartbeat", 1)
+end
+Check("相手がいなければ timeout", lastOf(q3, "QuickMatchState").args[1] == "timeout")
+MemQueue.items = {}
+-- やめる
+local q4 = newPlayer(304)
+join(q4)
+NetFire("QuickMatch", q4, true)
+NetFire("QuickMatch", q4, false)
+Check("やめられる", lastOf(q4, "QuickMatchState").args[1] == "cancel")
+MemQueue.items = {}
+
+-- 予約サーバーに着いた 2 人: 部屋を作って対戦を始める
+local function arriving(id, data)
+	local p = newPlayer(id)
+	p.GetJoinData = function()
+		return data
+	end
+	join(p)
+	NetFire("RequestState", p)
+	return p
+end
+local a1 = arriving(401, { TeleportData = { quick = { 401, 402 } } })
+Check("先に着いた人は部屋で待つ", lastOf(a1, "RoomState") ~= nil and lastOf(a1, "OnlineStart") == nil)
+local a2 = arriving(402, { TeleportData = { quick = { 401, 402 } } })
+local os1 = lastOf(a2, "OnlineStart")
+Check("2 人そろうと対戦が始まる", os1 ~= nil and os1.args[1].mode == "versus" and #os1.args[1].seats == 2)
+Check("2 人は別のチーム", os1 ~= nil and os1.args[1].seats[1].team ~= os1.args[1].seats[2].team)
+
+-- 招待: 同じサーバーなら部屋へ、別のサーバーならテレポート
+local host = newPlayer(501)
+join(host)
+NetFire("RoomCreate", host, "coop", { length = 180 })
+local hostRoom = lastOf(host, "RoomState").args[1].id
+local HttpService = game:GetService("HttpService")
+local g1 = arriving(502, { LaunchData = HttpService:JSONEncode({ j = "job-1", r = hostRoom }) })
+Check("招待で来た人は同じ部屋に入る", lastOf(g1, "RoomState") ~= nil and lastOf(g1, "RoomState").args[1].id == hostRoom)
+local g2 = arriving(503, { LaunchData = HttpService:JSONEncode({ j = "other-job", r = 7 }) })
+local tg = teleOf(g2)
+Check("別のサーバーの招待はそのサーバーへテレポート", tg ~= nil and tg.jobId == "other-job" and tg.data.room == 7)
+arriving(504, { LaunchData = "garbage" })
+arriving(505, { LaunchData = 12345 })
+Check("壊れた招待データでも落ちない", true)
+
 print(("== 結果: %d 失敗 =="):format(Failures))
 if Failures > 0 then
 	error("server smoke failed")

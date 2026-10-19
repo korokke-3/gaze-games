@@ -25,6 +25,9 @@ local EVENTS = {
 	"RoomOpts", -- (opts: table)  ホストだけ
 	"RoomStart", -- ()  ホストだけ
 	"MatchInput", -- (packet: string)  Snapshot.packInput
+	"QuickMatch", -- (on: boolean)  サーバーをまたいだ 1 対 1 を探す / やめる
+	"PracticeRecord", -- (kind: string, value: number)  練習の記録 (ランキング用)
+	"LeaderboardGet", -- (kind: string)
 
 	-- server -> client
 	"State", -- (state: table)  自分の完全な状態
@@ -35,6 +38,8 @@ local EVENTS = {
 	"OnlineStart", -- (info: table)
 	"OnlineSnap", -- (snapshot: string)
 	"OnlineEnd", -- (info: { result, reward, myTeam, aborted })
+	"QuickMatchState", -- (state: "searching" | "found" | "timeout" | "cancel" | "unavailable")
+	"Leaderboard", -- (kind: string, list: { { rank, name, userId, value } } | nil)
 }
 
 local Net = {}

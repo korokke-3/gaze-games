@@ -9,6 +9,8 @@ local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local StarterGui = game:GetService("StarterGui")
 local Lighting = game:GetService("Lighting")
+local SocialService = game:GetService("SocialService")
+local HttpService = game:GetService("HttpService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
@@ -307,6 +309,9 @@ local function practiceFinished(kind, pr, popts)
 	local best = key and menu.opts[key] or 0
 	local value = pr.result
 	local isNew = Practice.better(kind, value, best > 0 and best or nil) and (value or 0) > 0
+	if key and value ~= nil and value > 0 then
+		Net.event("PracticeRecord"):FireServer(kind, value) -- ランキング (サーバーが自己ベストだけ残す)
+	end
 	if isNew and key then
 		menu.opts[key] = value
 		Net.event("SaveSettings"):FireServer(menu.opts)
@@ -510,6 +515,30 @@ menu = Menu.new(menuGui, lang, {
 	onRoomPos = function(index)
 		Net.event("RoomPos"):FireServer(index)
 	end,
+	onQuickMatch = function(on)
+		Net.event("QuickMatch"):FireServer(on)
+	end,
+	onLeaderboard = function(kind)
+		Net.event("LeaderboardGet"):FireServer(kind)
+	end,
+	onInvite = function(roomId)
+		-- フレンドを招待: 受けた人はこのサーバーのこの部屋へ (別サーバーに入ったらテレポートで合流)
+		task.spawn(function()
+			local ok, can = pcall(function()
+				return SocialService:CanSendGameInviteAsync(player)
+			end)
+			if not ok or not can then
+				menu:toast(Locale.t(lang, "online.invite.unavailable"))
+				return
+			end
+			pcall(function()
+				local opts = Instance.new("ExperienceInviteOptions")
+				opts.PromptMessage = Locale.t(lang, "online.invite.message")
+				opts.LaunchData = HttpService:JSONEncode({ j = game.JobId, r = roomId })
+				SocialService:PromptGameInvite(player, opts)
+			end)
+		end)
+	end,
 	onRoomOpts = function(opts)
 		Net.event("RoomOpts"):FireServer({
 			length = opts.length,
@@ -547,7 +576,21 @@ Net.event("Rooms").OnClientEvent:Connect(function(list)
 	menu:setRooms(list)
 end)
 Net.event("RoomState").OnClientEvent:Connect(function(room)
+	local had = menu.room ~= nil
 	menu:setRoom(room)
+	-- 招待・クイックマッチで部屋に入った: オンラインのタブを開く
+	if room ~= nil and not had and current == nil and menu.page ~= "online" then
+		for _, b in menu.tabs do
+			b.Visible = true
+		end
+		menu:show("online")
+	end
+end)
+Net.event("QuickMatchState").OnClientEvent:Connect(function(st)
+	menu:setQuick(st)
+end)
+Net.event("Leaderboard").OnClientEvent:Connect(function(kind, list)
+	menu:setLeaderboard(kind, list)
 end)
 Net.event("OnlineStart").OnClientEvent:Connect(function(info)
 	onlineStart(info)

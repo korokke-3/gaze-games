@@ -72,7 +72,46 @@ Players_ = players
 -- DataStore (メモリ)
 local memory = {}
 DataStoreMemory = memory
+-- OrderedDataStore (メモリ、名前ごと)
+OrderedMemory = {}
+local function orderedStore(name)
+	OrderedMemory[name] = OrderedMemory[name] or {}
+	local mem = OrderedMemory[name]
+	return {
+		UpdateAsync = function(_, key, fn)
+			local r = fn(mem[key])
+			if r ~= nil then
+				mem[key] = r
+			end
+			return r
+		end,
+		GetSortedAsync = function(_, ascending, size)
+			local list = {}
+			for k, v in mem do
+				table.insert(list, { key = k, value = v })
+			end
+			table.sort(list, function(a, b)
+				if ascending then
+					return a.value < b.value
+				end
+				return a.value > b.value
+			end)
+			local page = {}
+			for i = 1, math.min(size, #list) do
+				page[i] = list[i]
+			end
+			return {
+				GetCurrentPage = function()
+					return page
+				end,
+			}
+		end,
+	}
+end
 local dataStoreService = {
+	GetOrderedDataStore = function(_, name)
+		return orderedStore(name)
+	end,
 	GetDataStore = function()
 		return {
 			UpdateAsync = function(_, key, fn)
@@ -141,11 +180,88 @@ local services = {
 	},
 	MarketplaceService = market,
 	DataStoreService = dataStoreService,
+	-- JSON は中身を覚えておく札で代用する
+	HttpService = {
+		JSONEncode = function(_, v)
+			JsonBox = JsonBox or {}
+			table.insert(JsonBox, v)
+			return "json#" .. #JsonBox
+		end,
+		JSONDecode = function(_, str)
+			local i = tonumber(string.match(str, "^json#(%d+)$"))
+			if i == nil or JsonBox == nil or JsonBox[i] == nil then
+				error("bad json")
+			end
+			return JsonBox[i]
+		end,
+	},
+	SocialService = {
+		CanSendGameInviteAsync = function()
+			return true
+		end,
+		PromptGameInvite = function(_, player, opts)
+			table.insert(Invites, { player = player, opts = opts })
+		end,
+	},
+	MemoryStoreService = {
+		GetQueue = function()
+			return MemQueue
+		end,
+	},
+	MessagingService = {
+		SubscribeAsync = function(_, topic, fn)
+			MsgSubs[topic] = MsgSubs[topic] or {}
+			table.insert(MsgSubs[topic], fn)
+		end,
+		PublishAsync = function(_, topic, data)
+			table.insert(Published, { topic = topic, data = data })
+			for _, fn in MsgSubs[topic] or {} do
+				fn({ Data = data })
+			end
+		end,
+	},
+	TeleportService = {
+		ReserveServer = function()
+			ReserveCount += 1
+			return "code-" .. ReserveCount
+		end,
+		TeleportToPrivateServer = function(_, placeId, code, list, spawnName, data)
+			for _, p in list do
+				table.insert(Teleports, { player = p, code = code, data = data })
+			end
+		end,
+		TeleportToPlaceInstance = function(_, placeId, jobId, p, spawnName, data)
+			table.insert(Teleports, { player = p, jobId = jobId, data = data })
+		end,
+	},
+}
+Invites, Published, Teleports, MsgSubs = {}, {}, {}, {}
+ReserveCount = 0
+-- MemoryStore のキュー (メモリ)
+MemQueue = {
+	items = {},
+	nextId = 0,
+	AddAsync = function(self, item, ttl)
+		table.insert(self.items, item)
+	end,
+	ReadAsync = function(self, count, allOrNothing, wait)
+		if #self.items < count then
+			return nil, nil
+		end
+		local out = {}
+		for i = 1, count do
+			out[i] = table.remove(self.items, 1)
+		end
+		self.nextId += 1
+		return out, "read-" .. self.nextId
+	end,
+	RemoveAsync = function() end,
 }
 market_ = market
 
 game = {
 	JobId = "job-1",
+	PlaceId = 86418072397733,
 	GetService = function(_, name)
 		return services[name] or Instance.new("Folder")
 	end,
@@ -173,7 +289,7 @@ for _, nme in { "World", "Hud", "Input", "Menu", "Sfx", "RemoteMatch", "Rig" } d
 end
 ServerRoot = node(nil, "Server", "server/init")
 local servicesFolder = node(ServerRoot, "Services")
-for _, nme in { "Data", "Store", "Matches", "Monetization", "Rooms" } do
+for _, nme in { "Data", "Store", "Matches", "Monetization", "Rooms", "Matchmaking", "Leaderboard" } do
 	node(servicesFolder, nme, "server/Services/" .. nme)
 end
 

@@ -18,6 +18,8 @@ MODULES = {
     "client/RemoteMatch": "src/client/RemoteMatch.luau",
     "client/Rig": "src/client/Rig.luau",
     "server/Services/Rooms": "src/server/Services/Rooms.luau",
+    "server/Services/Matchmaking": "src/server/Services/Matchmaking.luau",
+    "server/Services/Leaderboard": "src/server/Services/Leaderboard.luau",
     "client/init": "src/client/init.client.luau",
     "client/World": "src/client/World.luau",
     "client/Hud": "src/client/Hud.luau",

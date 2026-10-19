@@ -103,6 +103,30 @@ function Rooms.resolvePositions(room, team)
 	return out
 end
 
+--- その人がいる部屋 / 番号の部屋 (クイックマッチ用)。
+function Rooms.of(player)
+	return byPlayer[player]
+end
+
+function Rooms.get(id)
+	return rooms[id]
+end
+
+--- 待機中の部屋の種類を変える (クイックマッチで相手が来なかった時に CPU 戦へ)。
+function Rooms.setMode(id, mode)
+	local room = rooms[id]
+	if room == nil or room.state ~= "lobby" or (mode ~= "coop" and mode ~= "versus") then
+		return
+	end
+	room.mode = mode
+	if mode == "coop" then
+		for _, m in room.members do
+			m.team = 0
+		end
+	end
+	pushRoom(room)
+end
+
 function Rooms.list()
 	local out = {}
 	for _, room in rooms do

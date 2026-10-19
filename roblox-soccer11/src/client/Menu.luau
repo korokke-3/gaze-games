@@ -404,6 +404,10 @@ function Menu:_renderPractice()
 	local t = function(k, ...)
 		return Locale.t(self.lang, k, ...)
 	end
+	if self.lbKind ~= nil then
+		self:_renderBoard()
+		return
+	end
 	self:_header(t("practice.title"))
 	for _, def in PRACTICE do
 		local row = self:_row(64)
@@ -430,6 +434,21 @@ function Menu:_renderPractice()
 				TextColor3 = GOLD,
 				ZIndex = 33,
 			})
+			local rb = button(row, t("lb.open"), GREY, {
+				AnchorPoint = Vector2.new(1, 0),
+				Position = UDim2.new(1, -132, 0, 32),
+				Size = UDim2.fromOffset(110, 26),
+				TextSize = 13,
+				ZIndex = 33,
+			})
+			rb.Activated:Connect(function()
+				self.lbKind = def.kind
+				self.lbList = nil
+				if self.cb.onLeaderboard then
+					self.cb.onLeaderboard(def.kind)
+				end
+				self:_render()
+			end)
 		else
 			-- フリー練習: 相手の人数を選ぶ
 			local choices = { 0, 3, 11 }
@@ -463,6 +482,60 @@ function Menu:_renderPractice()
 			end
 		end)
 	end
+end
+
+--- ランキングの画面 (練習タブの中)。
+function Menu:_renderBoard()
+	local t = function(k, ...)
+		return Locale.t(self.lang, k, ...)
+	end
+	local kind = self.lbKind
+	local def = PRACTICE[1]
+	for _, d in PRACTICE do
+		if d.kind == kind then
+			def = d
+		end
+	end
+	self:_header(t("lb.title", t("practice." .. kind)))
+	local list = self.lbList
+	if list == nil then
+		label(self.scroll, t("lb.loading"), { Size = UDim2.new(1, 0, 0, 28), LayoutOrder = nextOrder(), ZIndex = 32 })
+	elseif list == false then
+		label(self.scroll, t("lb.error"), { Size = UDim2.new(1, 0, 0, 28), LayoutOrder = nextOrder(), ZIndex = 32 })
+	elseif #list == 0 then
+		label(self.scroll, t("lb.empty"), { Size = UDim2.new(1, 0, 0, 28), LayoutOrder = nextOrder(), ZIndex = 32 })
+	else
+		for _, e in list do
+			local row = self:_row(34)
+			local mine = e.userId == self.myId
+			label(row, string.format("%d.  %s", e.rank, e.name), {
+				Position = UDim2.fromOffset(12, 0),
+				Size = UDim2.new(0.65, -12, 1, 0),
+				TextColor3 = mine and GOLD or Color3.new(1, 1, 1),
+				ZIndex = 33,
+			})
+			label(row, self:_recordText(def, e.value), {
+				AnchorPoint = Vector2.new(1, 0),
+				Position = UDim2.new(1, -12, 0, 0),
+				Size = UDim2.new(0.35, 0, 1, 0),
+				TextXAlignment = Enum.TextXAlignment.Right,
+				TextColor3 = mine and GOLD or Color3.new(1, 1, 1),
+				ZIndex = 33,
+			})
+		end
+	end
+	label(self.scroll, t("lb.note"), {
+		Size = UDim2.new(1, 0, 0, 22),
+		TextSize = 13,
+		TextColor3 = Color3.fromRGB(180, 200, 190),
+		LayoutOrder = nextOrder(),
+		ZIndex = 32,
+	})
+	local back = button(self.scroll, t("lb.back"), GREY, { Size = UDim2.new(1, 0, 0, 40), LayoutOrder = nextOrder(), ZIndex = 32 })
+	back.Activated:Connect(function()
+		self.lbKind = nil
+		self:_render()
+	end)
 end
 
 --- 練習の結果。value: 今回の記録、best: これまでの自己ベスト、isNew: 更新したか
@@ -641,6 +714,18 @@ function Menu:_renderOnline()
 				ZIndex = 32,
 			})
 		end
+		if room.state == "lobby" then
+			local invite = button(self.scroll, t("online.invite"), Color3.fromRGB(40, 120, 190), {
+				Size = UDim2.new(1, 0, 0, 40),
+				LayoutOrder = nextOrder(),
+				ZIndex = 32,
+			})
+			invite.Activated:Connect(function()
+				if self.cb.onInvite then
+					self.cb.onInvite(room.id)
+				end
+			end)
+		end
 		local leave = button(self.scroll, t("online.leave"), Color3.fromRGB(150, 60, 60), {
 			Size = UDim2.new(1, 0, 0, 40),
 			LayoutOrder = nextOrder(),
@@ -651,6 +736,49 @@ function Menu:_renderOnline()
 		end)
 		return
 	end
+	-- クイックマッチ (サーバーをまたいで 1 対 1 の相手を探す)
+	self:_header(t("qm.title"))
+	local q = self.quick
+	if q == "searching" or q == "found" then
+		label(self.scroll, t(q == "found" and "qm.found" or "qm.searching"), {
+			Size = UDim2.new(1, 0, 0, 28),
+			TextXAlignment = Enum.TextXAlignment.Center,
+			TextColor3 = Color3.fromRGB(255, 255, 160),
+			LayoutOrder = nextOrder(),
+			ZIndex = 32,
+		})
+		if q == "searching" then
+			local cancel = button(self.scroll, t("qm.cancel"), GREY, { Size = UDim2.new(1, 0, 0, 40), LayoutOrder = nextOrder(), ZIndex = 32 })
+			cancel.Activated:Connect(function()
+				self.cb.onQuickMatch(false)
+			end)
+		end
+	else
+		if q == "timeout" then
+			label(self.scroll, t("qm.timeout"), {
+				Size = UDim2.new(1, 0, 0, 24),
+				TextXAlignment = Enum.TextXAlignment.Center,
+				TextColor3 = Color3.fromRGB(255, 200, 150),
+				LayoutOrder = nextOrder(),
+				ZIndex = 32,
+			})
+			local cpu = button(self.scroll, t("qm.cpu"), GREY, { Size = UDim2.new(1, 0, 0, 40), LayoutOrder = nextOrder(), ZIndex = 32 })
+			cpu.Activated:Connect(function()
+				self.quick = nil
+				self.cb.onStart(self.opts)
+			end)
+		end
+		local qb = button(self.scroll, t("qm.start"), GREEN, {
+			Size = UDim2.new(1, 0, 0, 50),
+			TextSize = 20,
+			LayoutOrder = nextOrder(),
+			ZIndex = 32,
+		})
+		qb.Activated:Connect(function()
+			self.cb.onQuickMatch(true)
+		end)
+	end
+	self:_header(t("online.rooms.title"))
 	label(self.scroll, t("online.note"), {
 		Size = UDim2.new(1, 0, 0, 52),
 		TextSize = 14,
@@ -707,6 +835,31 @@ end
 function Menu:setRooms(list)
 	self.rooms = list
 	if self.root.Visible and self.page == "online" then
+		self:_render()
+	end
+end
+
+--- クイックマッチの状態 ("searching" | "found" | "timeout" | "cancel" | "unavailable")。
+function Menu:setQuick(st)
+	if st == "unavailable" then
+		self:toast(Locale.t(self.lang, "qm.unavailable"))
+		st = nil
+	elseif st == "cancel" then
+		st = nil
+	end
+	self.quick = st
+	if self.root.Visible and self.page == "online" then
+		self:_render()
+	end
+end
+
+--- 練習のランキング (list = nil は取得できなかった)。
+function Menu:setLeaderboard(kind, list)
+	if self.lbKind ~= kind then
+		return
+	end
+	self.lbList = list or false
+	if self.root.Visible and self.page == "practice" then
 		self:_render()
 	end
 end

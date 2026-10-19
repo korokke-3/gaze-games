@@ -211,6 +211,40 @@ Check("結果画面から「もう一度」", again ~= nil and pcall(again.fn))
 Frames(10)
 FindButton("II").fn()
 FindButton("End practice").fn()
+-- 練習のランキング
+FindButton("Practice").fn()
+local rankBtn = FindButton("Ranking")
+Check("ドリルにランキングのボタン", rankBtn ~= nil and pcall(rankBtn.fn) and #CallsOf("LeaderboardGet") >= 1)
+local lbKind = CallsOf("LeaderboardGet")[#CallsOf("LeaderboardGet")].args[1]
+NetFire("Leaderboard", lbKind, { { rank = 1, name = "Champ", userId = 9, value = 3 }, { rank = 2, name = "Tester", userId = 1001, value = 2 } })
+local sawChamp = false
+for _, d in PlayerGui:GetDescendants() do
+	if d._p.ClassName == "TextLabel" and d._p.Text == "1.  Champ" then
+		sawChamp = true
+	end
+end
+Check("ランキングが表示される", sawChamp)
+NetFire("Leaderboard", lbKind, nil)
+Check("ランキングを取れなくても落ちない", FindButton("Back") ~= nil)
+FindButton("Back").fn()
+-- クイックマッチ
+local onlineBtn = FindButton("Online")
+onlineBtn.fn()
+local qmBtn = FindButton("Find an opponent")
+Check("クイックマッチのボタン", qmBtn ~= nil and pcall(qmBtn.fn) and #CallsOf("QuickMatch") == 1 and CallsOf("QuickMatch")[1].args[1] == true)
+NetFire("QuickMatchState", "searching")
+local cancelQm = FindButton("Cancel")
+Check("探している間はやめるボタン", cancelQm ~= nil and pcall(cancelQm.fn) and CallsOf("QuickMatch")[2].args[1] == false)
+NetFire("QuickMatchState", "timeout")
+Check("見つからなければ CPU 戦を勧める", FindButton("Play vs CPU instead") ~= nil)
+NetFire("QuickMatchState", "unavailable")
+-- 招待 (部屋の待機中)
+NetFire("RoomState", { id = 5, mode = "coop", state = "lobby", members = { { name = "Tester", userId = 1001, team = 0, host = true, pos = -1 } }, length = 180, difficulty = 3, cup = false, formation = "433", lockFrom = 4 })
+local inv = FindButton("Invite friends")
+Check("部屋にフレンド招待のボタン", inv ~= nil and pcall(inv.fn) and #Invites == 1)
+local posBtn = FindButton("Position: Any")
+Check("部屋で自分のポジションを選べる", posBtn ~= nil and pcall(posBtn.fn) and CallsOf("RoomPos")[1].args[1] == 0)
+NetFire("RoomState", nil)
 FindButton("Play").fn()
 
 -- 操作設定: パスを G に変える
